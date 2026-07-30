@@ -1,0 +1,228 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model University {
+  id                    Int       @id @default(autoincrement())
+  slug                  String    @unique
+  fullNameUz            String    @map("full_name_uz")
+  fullNameRu            String?   @map("full_name_ru")
+  fullNameEn            String?   @map("full_name_en")
+  abbrNameUz            String?   @map("abbr_name_uz")
+  abbrNameRu            String?   @map("abbr_name_ru")
+  abbrNameEn            String?   @map("abbr_name_en")
+  descriptionUz         String?   @map("description_uz")
+  descriptionRu         String?   @map("description_ru")
+  descriptionEn         String?   @map("description_en")
+  logo                  String?
+  institutionCategoryId Int?      @map("institution_category_id")
+  institutionType       String?   @map("institution_type")
+  locationId            Int?      @map("location_id")
+  phone                 String?
+  email                 String?
+  website               String?
+  supportEmail          String?   @map("support_email")
+  domain                String?
+  foundedYear           Int?      @map("founded_year")
+  studentsCount         Int?      @map("students_count")
+  minimalTuitionFee     Float?    @map("minimal_tuition_fee")
+  maximalTuitionFee     Float?    @map("maximal_tuition_fee")
+  addressUz             String?   @map("address_uz")
+  addressRu             String?   @map("address_ru")
+  addressEn             String?   @map("address_en")
+  latitude              Float?
+  longitude             Float?
+  admissionPhone        String?   @map("admission_phone")
+  admissionStartDate    DateTime? @map("admission_start_date")
+  admissionDeadline     DateTime? @map("admission_deadline")
+  currentQuota          Int?      @map("current_quota")
+  hasAccommodation      Boolean   @default(false) @map("has_accomodation")
+  hasGrant              Boolean   @default(false) @map("has_grant")
+  isPartner             Boolean   @default(false) @map("is_partner")
+  isOpenForAdmission    Boolean   @default(false) @map("is_open_for_admission")
+  isBanned              Boolean   @default(false) @map("is_banned")
+  representativeFullName String?  @map("representative_full_name")
+  certificationLink     String?   @map("certification_link")
+  accreditationCertificate String? @map("accreditation_certificate")
+  instagramUsername     String?   @map("instagram_username")
+  telegramUsername      String?   @map("telegram_username")
+  facebookUsername      String?   @map("facebook_username")
+  linkedinUsername      String?   @map("linkedin_username")
+  youtubeUsername       String?   @map("youtube_username")
+  createdAt             DateTime  @default(now()) @map("created_at")
+  updatedAt             DateTime  @updatedAt @map("updated_at")
+
+  directions     Direction[]
+  grants         UniversityGrant[]
+  news           News[]
+  gallery        Gallery[]
+  universityDirections UniversityDirection[]
+
+  @@map("universities")
+}
+
+model Direction {
+  id                    Int       @id @default(autoincrement())
+  universityId          Int       @map("university_id")
+  slug                  String    @unique
+  idNumber              String?   @map("id_number")
+  nameUz                String    @map("name_uz")
+  nameRu                String?   @map("name_ru")
+  nameEn                String?   @map("name_en")
+  descriptionUz         String?   @map("description_uz")
+  descriptionRu         String?   @map("description_ru")
+  descriptionEn         String?   @map("description_en")
+  categoryId            Int?      @map("category_id")
+  degreeIds             Int[]     @map("degree_ids")
+  contractTypeIds       Int[]     @map("contract_type_ids")
+  hasStipend            Boolean   @default(false) @map("has_stipend")
+  startDate             DateTime? @map("start_date")
+  endDate               DateTime? @map("end_date")
+  isOpenForAdmission    Boolean   @default(false) @map("is_open_for_admission")
+  isStudyTransferable   Boolean   @default(false) @map("is_study_transferable")
+  transferStartDate     DateTime? @map("transfer_start_date")
+  transferEndDate       DateTime? @map("transfer_end_date")
+  requirementUz         String?   @map("requirement_uz")
+  requirementRu         String?   @map("requirement_ru")
+  requirementEn         String?   @map("requirement_en")
+  hasMandatorySubjects  Boolean   @default(false) @map("has_mandatory_subjects")
+  firstSubject          String?   @map("first_subject")
+  secondSubject         String?   @map("second_subject")
+  examSubjects          Json?     @map("exam_subjects")
+  contractSerial        String?   @map("contract_serial")
+  createdAt             DateTime  @default(now()) @map("created_at")
+  updatedAt             DateTime  @updatedAt @map("updated_at")
+
+  university            University   @relation(fields: [universityId], references: [id])
+  educationTypeLanguages EducationTypeLanguage[]
+  universityDirections   UniversityDirection[]
+
+  @@map("directions")
+}
+
+model EducationTypeLanguage {
+  id                      Int      @id @default(autoincrement())
+  directionId             Int      @map("direction_id")
+  academicYear            Int?     @map("academic_year")
+  educationTypeId         Int      @map("education_type_id")
+  educationLanguageId     Int      @map("education_language_id")
+  localTuitionFee         Float?   @map("local_tuition_fee")
+  internationalTuitionFee Float?   @map("international_tuition_fee")
+
+  direction Direction @relation(fields: [directionId], references: [id])
+
+  @@map("education_type_languages")
+}
+
+model UniversityGrant {
+  id                  Int      @id @default(autoincrement())
+  grantImage          String?  @map("grant_image")
+  universitySlugName  String?  @map("university_slug_name")
+  universityNameUz    String?  @map("univer_name_uz")
+  universityNameRu    String?  @map("univer_name_ru")
+  universityNameEn    String?  @map("univer_name_en")
+  universityLogo      String?  @map("univer_logo")
+  regionNameUz        String?  @map("region_name_uz")
+  regionNameRu        String?  @map("region_name_ru")
+  regionNameEn        String?  @map("region_name_en")
+  grantTitleUz        String?  @map("grant_title_uz")
+  grantTitleRu        String?  @map("grant_title_ru")
+  grantTitleEn        String?  @map("grant_title_en")
+  grantDescUz         String?  @map("grant_desc_uz")
+  grantDescRu         String?  @map("grant_desc_ru")
+  grantDescEn         String?  @map("grant_desc_en")
+  status              String   @default("active")
+  order               Int?     @map("order")
+  createdAt           DateTime @default(now()) @map("created_at")
+
+  universityId Int? @map("university_id")
+  university   University? @relation(fields: [universityId], references: [id])
+
+  @@map("university_grants")
+}
+
+model News {
+  id              Int      @id @default(autoincrement())
+  relatedTo       String?  @map("related_to")
+  relationId      Int?     @map("relation_id")
+  headerImage     String?  @map("header_image")
+  titleUz         String?  @map("title_uz")
+  titleRu         String?  @map("title_ru")
+  titleEn         String?  @map("title_en")
+  descriptionUz   String?  @map("description_uz")
+  descriptionRu   String?  @map("description_ru")
+  descriptionEn   String?  @map("description_en")
+  status          String   @default("active")
+  viewsCount      Int      @default(0) @map("views_count")
+  tagIds          Int[]    @map("tag_ids")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  universityId Int? @map("university_id")
+  university   University? @relation(fields: [universityId], references: [id])
+
+  @@map("news")
+}
+
+model Gallery {
+  id           Int      @id @default(autoincrement())
+  universityId Int      @map("university_id")
+  imageUrl     String   @map("image_url")
+  captionUz    String?  @map("caption_uz")
+  captionRu    String?  @map("caption_ru")
+  captionEn    String?  @map("caption_en")
+  order        Int?     @map("order")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  university University @relation(fields: [universityId], references: [id])
+
+  @@map("gallery")
+}
+
+model UniversityDirection {
+  universityId Int @map("university_id")
+  directionId  Int @map("direction_id")
+
+  university University @relation(fields: [universityId], references: [id])
+  direction  Direction  @relation(fields: [directionId], references: [id])
+
+  @@id([universityId, directionId])
+  @@map("university_directions")
+}
+
+model ChatSession {
+  id            String   @id @default(cuid())
+  userId        String?  @map("user_id")
+  title         String?
+  language      String   @default("uz")
+  currentUniversityId Int? @map("current_university_id")
+  currentDirectionId  Int? @map("current_direction_id")
+  metadata      Json?    @map("metadata")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  messages ChatMessage[]
+
+  @@map("chat_sessions")
+}
+
+model ChatMessage {
+  id             String   @id @default(cuid())
+  sessionId      String   @map("session_id")
+  role           String
+  content        String
+  intent         String?
+  selectedTool   String?  @map("selected_tool")
+  toolResults    Json?    @map("tool_results")
+  tokensUsed     Int?     @map("tokens_used")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  session ChatSession @relation(fields: [sessionId], references: [id])
+
+  @@map("chat_messages")
+}
