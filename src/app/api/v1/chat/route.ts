@@ -1,6 +1,8 @@
 ﻿import { NextRequest, NextResponse } from "next/server";
 import { llmService } from "@/ai-agent/llm-service";
 import { intentClassifier } from "@/ai-agent/intent-classifier";
+import { GENERIC_TOPIC_HEADING } from "@/ai-agent/direction-synonyms";
+import { getSelfCompleteIntents } from "@/ai-agent/intent-config";
 import prisma from "@/lib/prisma";
 import { sanitizeText } from "@/lib/sanitize-text";
 import type { ChatMessage, SessionContext } from "@/types";
@@ -60,6 +62,11 @@ export async function POST(request: NextRequest) {
       interestGrant: metadata.interestGrant as boolean | undefined,
       currentDegree: metadata.currentDegree as string | undefined,
       currentLanguage: metadata.currentLanguage as string | undefined,
+      currentTuitionMax: metadata.currentTuitionMax as number | undefined,
+      currentTuitionMin: metadata.currentTuitionMin as number | undefined,
+      recommendationProfile: metadata.recommendationProfile as SessionContext["recommendationProfile"] | undefined,
+      lastRecommendations: metadata.lastRecommendations as SessionContext["lastRecommendations"] | undefined,
+      lastUniversity: metadata.lastUniversity as SessionContext["lastUniversity"] | undefined,
     };
 
     // Get conversation history
@@ -83,7 +90,7 @@ export async function POST(request: NextRequest) {
 
     // Save and sanitize AI response
     const sanitizedContent = sanitizeText(response.content || '');
-    await prisma.chatMessage.create({
+    const assistantMessage = await prisma.chatMessage.create({
       data: {
         sessionId: session.id,
         role: "assistant",
@@ -93,20 +100,30 @@ export async function POST(request: NextRequest) {
       },
     });
 
-    // Extract topic name from response for follow-up detection
-    // Single university: ## ðŸ› University Name
-    // Direction list: ### ðŸ“š University Name yo'nalishlari
-    // Region overview: ### ðŸ› Region Name â€” "Toshkent shahri" ni topic sifatida
-    // MUHIM: faqat yangi topic topilganda metadata ni yangilaymiz, aks holda
-    // eski topic nomi o'chib ketadi!
+    // Extract topic name from response for follow-up detection.
+    // Do not depend on emoji bytes here: older files had mojibake like "ðŸ...",
+    // while current responses use clean emoji or sometimes no emoji at all.
     const content = sanitizedContent || '';
-    const singleUniMatch = content.match(/## ðŸ› ([^\n]+)/);
-    const dirMatch = content.match(/### ðŸ“š ([^\n]+) yo'nalishlari/i);
-    const regionMatch = content.match(/### ðŸ› ([^\n]+) universitetlari/i);
-    const newTopicName = 
-      singleUniMatch?.[1]?.trim() || 
-      dirMatch?.[1]?.trim() || 
-      regionMatch?.[1]?.trim();
+    const cleanHeading = (value?: string) =>
+      value
+        ?.replace(/^[^\p{L}\p{N}'"`]+/u, '')
+        .replace(/\s+(haqida|yo'nalishlari|universitetlari|ro'yxati|kontrakt narxi|kontrakti|narxi)\s*$/i, '')
+        .trim();
+
+    const singleUniMatch = content.match(/^#{1,3}\s*(?:🏛\s*)?(.+?)(?:\n|$)/m);
+    const dirMatch = content.match(/^#{1,3}\s*(?:📚\s*)?(.+?)\s+yo'nalishlari(?:\n|$)/im);
+    const regionMatch = content.match(/^#{1,3}\s*(?:🏛\s*)?(.+?)\s+universitetlari(?:\n|$)/im);
+    let extractedTopicName =
+      cleanHeading(dirMatch?.[1]) ||
+      cleanHeading(regionMatch?.[1]) ||
+      cleanHeading(singleUniMatch?.[1]);
+
+    // MUHIM: shablon sarlavhalari mavzu bo'lib qolmasin!
+    // "Sizga eng yaxshi variantni topaman!" kabi generic sarlavhalar
+    // currentTopicName ga yozilib qolsa, keyingi follow-up so'rovlar buziladi.
+    if (extractedTopicName && GENERIC_TOPIC_HEADING.test(extractedTopicName)) {
+      extractedTopicName = undefined;
+    }
 
     const messageIntent = intentClassifier.classify(message);
     const entities = messageIntent.entities || {};
@@ -117,8 +134,155 @@ export async function POST(request: NextRequest) {
     if (entities.direction) metadataUpdate.currentDirectionCategory = entities.direction;
     if (entities.degree) metadataUpdate.currentDegree = entities.degree;
     if (entities.language) metadataUpdate.currentLanguage = entities.language;
+    // BOSQICH 3: byudjet entity'larini ham session kontekstida saqlaymiz
+    // ("Toshkentdagi universitetlar → 20 mln gachasi" zanjiri uchun)
+    if (entities.tuitionMax !== undefined) metadataUpdate.currentTuitionMax = entities.tuitionMax;
+    if (entities.tuitionMin !== undefined) metadataUpdate.currentTuitionMin = entities.tuitionMin;
     if (messageIntent.intent === "grant_search" || /\b(grant|stipendiya|scholarship|bepul|tekin)\b/i.test(message)) {
       metadataUpdate.interestGrant = true;
+    }
+
+    // ===== RECOMMENDATION PROFILE (BOSQICH 9) =====
+    // Session bo'ylab foydalanuvchi profili to'planadi (JARVIS usuli):
+    //   "Matematikam yaxshi" → strengths:["matematika"]
+    //   "Pulim kam"         → budgetLevel:"low"
+    //   "Toshkentda o'qimoqchiman" → city:"Toshkent"
+    //   "Ingliz tilim C1"   → language:"english"
+    //   "Magistratura"      → degree:"master"
+    // Har bir yangi so'rovda yangi ma'lumotlar qo'shilib boradi.
+    const profile: NonNullable<SessionContext["recommendationProfile"]> =
+      metadataUpdate.recommendationProfile ?? {};
+    const addToArray = (key: "interests" | "strengths" | "weaknesses", value?: string) => {
+      if (!value) return;
+      const arr = (profile[key] = profile[key] || []);
+      const lowerVal = value.toLowerCase();
+      if (!arr.some((v) => v.toLowerCase() === lowerVal)) arr.push(value);
+    };
+
+    // Kuchli tomonlar: "matematikam yaxshi", "biologiyam kuchli", "inglizim C1"
+    // MUHIM (reviewer fix): "matematikam yaxshi emas" strength EMAS — negative
+    // lookahead "emas/yo'q" kelsa strength hisoblanmaydi (ziddiyatli profil).
+    const strengthMatch =
+      message.toLowerCase().match(/([a-zāōūģķļņŗşž'’\-]+)(?:m|im)?\s+(yaxshi|kuchli|zo'r|a'lo|yaxshi darajada|yaxshiroq)(?!\s+(emas|yo'q|kuchli emas|zo'r emas)\b)/i) ||
+      message.toLowerCase().match(/([a-zāōūģķļņŗşž'’\-]+)\s+(C1|C2|B2|B1)\b/i);
+    if (strengthMatch && strengthMatch[1] && !/\b(men|biz|bu|shu)\b/i.test(strengthMatch[1])) {
+      // "tilim C1" emas — "inglizim C1" to'liq olinadi
+      const cleanStrength = strengthMatch[1].replace(/\b(tilim|tili|til)\b/i, "").trim();
+      if (cleanStrength.length >= 3) addToArray("strengths", cleanStrength);
+    }
+    // Zaif tomonlar: "matematikam past", "fizikam unchalik emas"
+    // MUHIM (reviewer fix): weakness strength'da qo'shilgan bo'lsa uni
+    // strengths'dan olib tashlaymiz ("matematikam yaxshi emas" holati).
+    const weaknessMatch = message.toLowerCase().match(/([a-zāōūģķļņŗşž'’\-]+)(?:m|im)?\s+(past|zaif|unchalik emas|yaxshi emas|kuchsiz|zo'r emas)(?<!\b(zo'r|kuchli|yaxshi)\s+)/i);
+    if (weaknessMatch && weaknessMatch[1] && !/\b(men|biz|bu|shu)\b/i.test(weaknessMatch[1])) {
+      const weak = weaknessMatch[1].trim();
+      // Agar shu so'z strength'ga qo'shilgan bo'lsa ("matematikam yaxshi emas"
+      // noto'g'ri strength bo'lib qolgan) — olib tashlaymiz, ziddiyat yo'qoladi.
+      const strengthIdx = (profile.strengths || []).findIndex(
+        (s) => s.toLowerCase() === weak.toLowerCase()
+      );
+      if (strengthIdx >= 0) profile.strengths!.splice(strengthIdx, 1);
+      addToArray("weaknesses", weak);
+    }
+    // Qiziqishlar: "AI ga qiziqaman", "tibbiyotga qiziqaman", "IT yoqadi"
+    if (entities.direction && /\b(qiziq|yoqadi|yaxshi ko'raman|ishlamoqchiman|bo'lmoqchiman)\b/i.test(message)) {
+      addToArray("interests", entities.direction);
+    }
+    // Budjet: "pulim kam", "budjetim cheklangan"
+    if (/\b(pulim|mablag'im|mablagim|byudjetim|budjetim)\s+(kam|oz|cheklangan|yetarli emas|yetmaydi)\b/i.test(message)) {
+      profile.budgetLevel = "low";
+    }
+    if (/\b(pulim|mablag'im|mablagim)\s+(yetarli|ko'p|yaxshi)\b/i.test(message)) {
+      profile.budgetLevel = "high";
+    }
+    // Shahar: region entity'dan profil city
+    if (entities.region && metadataUpdate.currentRegion) {
+      // Region ID'ni nomga aylantirish chat route'da lookup yo'q — city o'rniga
+      // metadataUpdate.currentRegion (ID) saqlanadi; profil city ko'rsatish uchun
+      // entity extractor'dagi region nomini saqlash qiyin — shuning uchun
+      // region ID profilga ham yoziladi (tool-router uni o'qiydi).
+      profile.city = entities.region;
+    }
+    // Til: "ingliz tilim yaxshi"
+    if (entities.language) profile.language = entities.language;
+    // Daraja: "magistratura"
+    if (entities.degree) profile.degree = entities.degree;
+    // Grant qiziqishi
+    if (metadataUpdate.interestGrant) profile.interestGrant = true;
+    // Xorij: "xorijga ketmoqchiman", "chet elda o'qimoqchiman"
+    if (/\b(xorij|chet el|abroad|dunyo)\w*\s+(ketmoqchiman|o'qimoqchiman|bormoqchiman|chiqmoqchiman)\b/i.test(message)) {
+      profile.wantsForeign = true;
+    }
+
+    if (Object.keys(profile).length > 0) {
+      metadataUpdate.recommendationProfile = profile;
+    }
+    // ===== RECOMMENDATION PROFILE (yakun) =====
+
+    // ===== RECOMMENDATION MEMORY (BOSQICH 9) =====
+    // provider-manager sessionContext.lastRecommendations ni yangilagan bo'lsa
+    // (recommend tool ishlaganda), uni metadata'ga yozamiz — keyingi
+    // so'rovlarda eslab qolinadi ("Yotoqxonasi bormi?" kabi follow-up).
+    // MUHIM (reviewer fix): bo'sh bo'lsa eski (stale) ro'yxat saqlanmasin.
+    if (sessionContext.lastRecommendations && sessionContext.lastRecommendations.length > 0) {
+      metadataUpdate.lastRecommendations = sessionContext.lastRecommendations;
+    } else {
+      delete metadataUpdate.lastRecommendations;
+    }
+    // ===== RECOMMENDATION MEMORY (yakun) =====
+
+    // ===== LAST UNIVERSITY MEMORY (BOSQICH 11) =====
+    // provider-manager/tool-router sessionContext.lastUniversity ni yangilagan
+    // bo'lsa (search_university / search_direction / recommend / get_university
+    // ishlaganda), uni metadata'ga yozamiz — keyingi so'rovlarda eslab qolinadi
+    // ("uning narxlari qancha?" kabi follow-up). Bo'sh bo'lsa eski (stale)
+    // ro'yxat saqlanmasin.
+    if (sessionContext.lastUniversity) {
+      metadataUpdate.lastUniversity = sessionContext.lastUniversity;
+    } else {
+      delete metadataUpdate.lastUniversity;
+    }
+    // ===== LAST UNIVERSITY MEMORY (yakun) =====
+
+    const isExplicitUniversitySwitch = messageIntent.intent === "university_search" && !!entities.university;
+
+    // MUHIM: selfComplete intent'lar (greeting, thanks, direction_list, etc.)
+    // o'z-o'zidan to'liq — keyingi follow-up'lar buzilmasligi uchun
+    // eski kontekstni tozalaymiz. "Rahmat" dan keyin "Telefon raqamini bering"
+    // eski mavzu bilan buzilib qolmasligi kerak.
+    const selfCompleteIntents = getSelfCompleteIntents();
+    // MUHIM (Fix 19): currentTopicName ni HAMMA selfComplete intent uchun
+    // o'chirib bo'lmaydi! "faq" (Rektori kim?), "tuition_search" (Kontrakti
+    // qancha?), "admission" (Qabul ochilganmi?) — bularning barchasi
+    // follow-up savollar bo'lib, KEYINGI xabarga mavzu sifatida kerak.
+    // Faqat YANGI MAVZU ochuvchi intent'larda (greeting, thanks, *_list)
+    // topic tozalanadi. Aks holda "TATU → Kontrakti qancha? → Telefon
+    // raqami?" zanjiri uzilib qolardi.
+    const topicClearingIntents = ["greeting", "thanks", "university_list", "direction_list", "grant_list", "news_list", "news_search"];
+    if (selfCompleteIntents.includes(messageIntent.intent)) {
+      delete metadataUpdate.currentDirectionCategory;
+      delete metadataUpdate.currentRegion;
+      delete metadataUpdate.currentInstitutionCategory;
+      delete metadataUpdate.currentDegree;
+      delete metadataUpdate.currentLanguage;
+      delete metadataUpdate.currentTuitionMax;
+      delete metadataUpdate.currentTuitionMin;
+      delete metadataUpdate.interestGrant;
+      if (topicClearingIntents.includes(messageIntent.intent)) {
+        delete metadataUpdate.currentTopicName;
+      }
+    }
+
+    const newTopicName = extractedTopicName || (isExplicitUniversitySwitch ? entities.university : undefined);
+
+    if (isExplicitUniversitySwitch) {
+      delete metadataUpdate.currentDirectionCategory;
+      delete metadataUpdate.currentRegion;
+      delete metadataUpdate.currentInstitutionCategory;
+      delete metadataUpdate.currentDegree;
+      delete metadataUpdate.currentLanguage;
+      delete metadataUpdate.currentTuitionMax;
+      delete metadataUpdate.currentTuitionMin;
     }
 
     if (newTopicName && newTopicName.length > 3) {
@@ -144,6 +308,7 @@ export async function POST(request: NextRequest) {
       success: true,
       data: {
         message: sanitizedContent,
+        messageId: assistantMessage.id,
         sessionId: session.id,
         intent: response.intent,
         toolUsed: response.toolUsed,
@@ -222,12 +387,25 @@ function getSuggestions(intent: string): string[] {
         "PDP University haqida ma'lumot",
         "Yotoqxonali universitetlar",
       ];
+    case "direction_list":
+      return [
+        "IT yo'nalishlari",
+        "Tibbiyot yo'nalishlari",
+        "Iqtisod yo'nalishlari",
+        "Pedagogika yo'nalishlari",
+      ];
     case "direction_search":
       return [
         "IT yo'nalishlari",
         "Ingliz tilidagi magistratura",
         "Kunduzgi bakalavr dasturlari",
         "Sirtqi ta'lim yo'nalishlari",
+      ];
+    case "grant_list":
+      return [
+        "Qanday grantlar bor",
+        "100% grantlar",
+        "Toshkentdagi grantlar",
       ];
     case "grant_search":
       return [
@@ -236,11 +414,24 @@ function getSuggestions(intent: string): string[] {
         "Toshkentdagi grantlar",
         "PDP grantlari",
       ];
+    case "tuition_search":
+      return [
+        "Eng arzon universitetlar",
+        "Toshkentdagi eng arzon universitet",
+        "Kontrakt narxlari qancha",
+      ];
+    case "news_list":
     case "news_search":
       return [
         "So'nggi yangiliklar",
         "Grant yangiliklari",
         "Universitet yangiliklari",
+      ];
+    case "university_list":
+      return [
+        "Qanday universitetlar bor",
+        "Toshkentdagi universitetlar",
+        "Davlat universitetlari",
       ];
     default:
       return [

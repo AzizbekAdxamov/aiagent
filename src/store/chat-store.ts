@@ -82,7 +82,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const result = await response.json();
 
       const assistantMessage: ChatMessage = {
-        id: `assistant-${Date.now()}`,
+        id: result.data.messageId || `assistant-${Date.now()}`,
         role: "assistant",
         content: result.data.message,
         intent: result.data.intent,

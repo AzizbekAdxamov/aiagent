@@ -8,7 +8,7 @@ import { LoadingState } from "./LoadingState";
 import { Bot, Sparkles, Brain } from "lucide-react";
 
 export function ChatMessages() {
-  const { messages, isLoading, sendMessage } = useChatStore();
+  const { messages, isLoading, sendMessage, currentSessionId } = useChatStore();
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -97,6 +97,8 @@ export function ChatMessages() {
         {messages.map((msg, index) => (
           <div key={msg.id} className="message-stagger" style={{ animationDelay: `${index * 50}ms` }}>
             <ChatMessageComponent
+              id={msg.id}
+              sessionId={currentSessionId || undefined}
               role={msg.role as "user" | "assistant"}
               content={msg.content}
               intent={msg.intent}

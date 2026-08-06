@@ -13,8 +13,12 @@
  */
 
 import iconv from 'iconv-lite';
+import { readFileSync, writeFileSync } from "fs";
+import { join } from "path";
 
 const BASE_URL = process.env.MENTALABA_API_URL || "https://api.mentalaba.uz/v1";
+// .env fayli proyekt ildizida (npm run dev shu yerdan ishga tushadi)
+const ENV_PATH = join(process.cwd(), ".env");
 const ACCESS_TOKEN = process.env.MENTALABA_API_KEY || "";
 const REFRESH_TOKEN = process.env.MENTALABA_REFRESH_TOKEN || "";
 
@@ -61,14 +65,22 @@ class ExternalAPI {
 
   private async executeTokenRefresh(): Promise<void> {
     try {
-      const response = await fetch(`${this.baseURL}/auth/refresh`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ refreshToken: this.refreshTokenValue }),
-      });
+      let response = await this.postRefresh();
+
+      // 401 bo'lsa — refresh token ham eskirgan bo'lishi mumkin.
+      // .env ga yangi token yozilgan bo'lsa (login skript yoki qo'lda),
+      // uni o'qib yana bir marta urinamiz — server restart talab qilinmaydi.
+      if (response.status === 401 && this.reloadTokensFromEnv()) {
+        console.log("[Token Refresh] .env dan yangi tokenlar o'qildi — qayta urinish...");
+        response = await this.postRefresh();
+      }
 
       if (!response.ok) {
-        console.warn("[Token Refresh Failed]", response.status);
+        if (response.status === 401) {
+          console.warn("[Token Refresh Failed] 401 — Refresh token ham muddati o'tgan.\n  ➜ Yangi token olish: node scripts/mentalaba-login.mjs (admin email + parol)\n  ➜ yoki .env dagi MENTALABA_API_KEY / MENTALABA_REFRESH_TOKEN ni yangilang.");
+        } else {
+          console.warn("[Token Refresh Failed]", response.status);
+        }
         return;
       }
 
@@ -79,11 +91,73 @@ class ExternalAPI {
         this.refreshTokenValue = data.refreshToken || data.refresh_token;
       }
 
+      // MUHIM: aylanadigan tokenlarni .env ga yozish — server qayta ishga tushganda
+      // eski o'lik token ishlatilmaydi, zanjir uzilmaydi.
+      this.persistTokens();
+
       this.scheduleTokenRefresh();
     } catch (error) {
       console.error("[Token Refresh Error]", error);
     } finally {
       this.refreshInProgress = null;
+    }
+  }
+
+  private async postRefresh(): Promise<Response> {
+    return fetch(`${this.baseURL}/auth/refresh`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ refreshToken: this.refreshTokenValue }),
+    });
+  }
+
+  /**
+   * .env faylidan tokenlarni qayta o'qiydi.
+   * Foydalanuvchi .env ni yangilagan bo'lsa (login skript yoki qo'lda),
+   * ishlayotgan server ham darhol yangi tokenni oladi — restart shart emas.
+   * @returns tokenlar o'zgargan bo'lsa true
+   */
+  private reloadTokensFromEnv(): boolean {
+    try {
+      const env = readFileSync(ENV_PATH, "utf8");
+      const get = (key: string) => env.match(new RegExp(`^${key}=(.*)$`, "m"))?.[1]?.trim();
+      const newAccess = get("MENTALABA_API_KEY");
+      const newRefresh = get("MENTALABA_REFRESH_TOKEN");
+      let changed = false;
+      if (newAccess && newAccess !== this.accessToken) {
+        this.accessToken = newAccess;
+        changed = true;
+      }
+      if (newRefresh && newRefresh !== this.refreshTokenValue) {
+        this.refreshTokenValue = newRefresh;
+        changed = true;
+      }
+      return changed;
+    } catch (error) {
+      console.warn("[Token Reload Warn]", (error as Error).message);
+      return false;
+    }
+  }
+
+  /**
+   * Yangi aylanadigan tokenlarni .env fayliga yozish.
+   * Server restart bo'lsa ham yangi token ishlatiladi.
+   */
+  private persistTokens(): void {
+    try {
+      let env = readFileSync(ENV_PATH, "utf8");
+      const setLine = (key: string, value: string) => {
+        const line = `${key}=${value}`;
+        const re = new RegExp(`^${key}=.*$`, "m");
+        if (re.test(env)) env = env.replace(re, line);
+        else env = env.replace(/\n*$/, "") + `\n${line}\n`;
+      };
+      setLine("MENTALABA_API_KEY", this.accessToken);
+      setLine("MENTALABA_REFRESH_TOKEN", this.refreshTokenValue);
+      writeFileSync(ENV_PATH, env);
+      console.log("[Token Refresh] .env yangilandi (keyingi restart uchun ham amal qiladi)");
+    } catch (error) {
+      console.warn("[Token Persist Warn]", (error as Error).message);
     }
   }
 

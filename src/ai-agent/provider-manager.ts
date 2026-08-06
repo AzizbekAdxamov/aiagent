@@ -1,20 +1,71 @@
-﻿import OpenAI from "openai";
+import OpenAI from "openai";
 import { GoogleGenerativeAI, GenerativeModel } from "@google/generative-ai";
-import type { ChatMessage } from "@/types";
+import type { ChatMessage, IntentResult } from "@/types";
 import { contextBuilder } from "./context-builder";
 import { intentClassifier } from "./intent-classifier";
 import { toolRouter } from "./tool-router";
-import { lookupManager } from "@/data/lookups";
 import { embeddingService } from "./embedding-service";
+import { augmentFollowUp, updateRecommendationProfile } from "./follow-up-context";
+import { getIntentDataFlag, getIntentResponseStrategy } from "./intent-config";
+import { buildEntityExtractionPrompt, parseEntitiesJSON } from "./llm-entity-extractor";
+import { responseBuilder } from "./formatter";
+import { detectRequestField, isBareFieldRequest, requestFieldLabel } from "./request-field";
+import { universityClarificationResponse } from "./formatter/common";
+import { buildCompactContext } from "./compact-context";
+import { buildSnapshotHistory } from "./compact-history";
+import { responseCache } from "./response-cache";
+import { logAnalytics } from "./analytics";
 
-export type AIProvider = "groq" | "gemini" | "openai";
+/**
+ * Promise'ni timeout bilan o'rab oladi. Kechikkan xato unhandled rejection
+ * bo'lmasligi uchun ichki .catch() qo'shilgan — timeout yoki xato → null.
+ */
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T | null> {
+  return Promise.race([
+    promise.catch((e: any) => {
+      console.warn(`[LLM Entities] ${label} xato: ${e?.message || e}`);
+      return null;
+    }),
+    new Promise<T | null>((resolve) => setTimeout(() => resolve(null), ms)),
+  ]);
+}
+
+export type AIProvider = "groq" | "openrouter" | "deepseek" | "gemini" | "openai";
 
 class ProviderManager {
   private groqClient: OpenAI | null = null;
+  private openRouterClient: OpenAI | null = null;
+  private deepseekClient: OpenAI | null = null;
   private geminiModel: GenerativeModel | null = null;
   private openaiClient: OpenAI | null = null;
   private activeProvider: AIProvider = "groq";
   private initialized = false;
+
+  /**
+   * CIRCUIT BREAKER (umumiy): qaysi provider 429 / "Insufficient Balance" /
+   * "quota" xatosi bersa, o'sha provider 2 daqiqaga o'tkazib yuboriladi —
+   * so'rovlar avtomatik keyingi provider'ga boradi.
+   * 2 daqiqadan keyin o'sha provider qayta urinib ko'riladi (limit/balans
+   * tiklanganda avtomatik ishlay boshlaydi).
+   */
+  private circuitUntil: Partial<Record<AIProvider, number>> = {};
+
+  /** Provider hozircha o'tkazib yuborilishi kerakmi? (limit xatosi bo'lgan bo'lsa 2 daqiqa) */
+  private shouldSkipProvider(name: AIProvider): boolean {
+    return (this.circuitUntil[name] || 0) > Date.now();
+  }
+
+  /** Provider limit xatosi berganida chaqiriladi — 2 daqiqaga circuit ochamiz */
+  private openCircuit(name: AIProvider): void {
+    this.circuitUntil[name] = Date.now() + 2 * 60 * 1000;
+    console.log(`[CircuitBreaker] ${name} limit xatosi — 2 daqiqa o'tkazib yuboriladi`);
+  }
+
+  /** 429 / rate limit / quota / insufficient balance — limit xatosi ekanini aniqlaydi */
+  private isLimitError(error: any): boolean {
+    const msg = (error?.message || "") + " " + JSON.stringify(error?.response?.data || {});
+    return /429|rate ?limit|quota|insufficient|balance/i.test(msg);
+  }
 
   getActiveProvider(): AIProvider {
     return this.activeProvider;
@@ -33,6 +84,18 @@ class ProviderManager {
         freeTier: true,
       },
       {
+        name: "openrouter",
+        displayName: "OpenRouter (100+ models)",
+        configured: !!process.env.OPENROUTER_API_KEY,
+        freeTier: false,
+      },
+      {
+        name: "deepseek",
+        displayName: "DeepSeek (V4)",
+        configured: !!process.env.DEEPSEEK_API_KEY,
+        freeTier: false,
+      },
+      {
         name: "gemini",
         displayName: "Google Gemini",
         configured: !!process.env.GEMINI_API_KEY,
@@ -47,26 +110,178 @@ class ProviderManager {
     ];
   }
 
-  private hasRegionMention(message: string): boolean {
-    return /\b(?:toshkent(?:da|dagi|ga|dan|ning|ni)?|samarqand(?:da|dagi|ga|dan|ning|ni)?|buxoro(?:da|dagi|ga|dan|ning|ni)?|andijon(?:da|dagi|ga|dan|ning|ni)?|farg(?:'ona|ona)(?:da|dagi|ga|dan|ning|ni)?|namangan(?:da|dagi|ga|dan|ning|ni)?|qarshi(?:da|dagi|ga|dan|ning|ni)?|urganch(?:da|dagi|ga|dan|ning|ni)?|nukus(?:da|dagi|ga|dan|ning|ni)?|jizzax(?:da|dagi|ga|dan|ning|ni)?|navoiy(?:da|dagi|ga|dan|ning|ni)?|xorazm(?:da|dagi|ga|dan|ning|ni)?|sirdaryo(?:da|dagi|ga|dan|ning|ni)?|surxondaryo(?:da|dagi|ga|dan|ning|ni)?)\b/i.test(message);
-  }
+  /**
+   * BOSQICH 5: LLM-assisted entity extraction.
+   *
+   * Provider mavjud bo'lganda message'dan entity'larni LLM orqali ajratadi
+   * (structured JSON output). Xato/timeout/provider yo'q bo'lsa null qaytaradi —
+   * rule-based natija fallback sifatida saqlanadi (intentClassifier.extractEntities).
+   *
+   * @returns IntentResult['entities'] yoki null (xato / timeout / hech narsa topilmadi)
+   */
+  async extractEntitiesWithLLM(
+    message: string,
+    language: "uz" | "ru" | "en" = "uz"
+  ): Promise<IntentResult["entities"] | null> {
+    if (!this.initialized) {
+      console.log("[LLM Entities] Provider yo'q — rule-based ishlatiladi");
+      return null;
+    }
 
-  private hasCategoryMention(message: string): boolean {
-    return /\b(?:davlat(?:da|dagi|ga|dan|ning|ni)?|xususiy(?:da|dagi|ga|dan|ning|ni)?|xalqaro(?:da|dagi|ga|dan|ning|ni)?|public|private|state|international|nodavlat(?:da|dagi|ga|dan|ning|ni)?)\b/i.test(message);
-  }
+    const prompt = buildEntityExtractionPrompt(message, language);
 
-  private hasDirectionMention(message: string): boolean {
-    return /\b(?:it|tibbiyot(?:da|dagi|ga|dan|ning|ni)?|iqtisod(?:da|dagi|ga|dan|ning|ni)?|huquq(?:da|dagi|ga|dan|ning|ni)?|pedagogika(?:da|dagi|ga|dan|ning|ni)?|muhandislik(?:da|dagi|ga|dan|ning|ni)?|filologiya(?:da|dagi|ga|dan|ning|ni)?|sanat(?:da|dagi|ga|dan|ning|ni)?|sport(?:da|dagi|ga|dan|ning|ni)?|turizm(?:da|dagi|ga|dan|ning|ni)?|qishloq(?:da|dagi|ga|dan|ning|ni)?)\b/i.test(message);
-  }
+    // Groq birinchi (eng tez, free)
+    // MUHIM: parsed !== null bo'lsa darhol qaytamiz (bo'sh {} ham) — muvaffaqiyatli
+    // parse boshqa provider'larni urishni talab qilmaydi (bo'sh merge = no-op).
+    if (this.groqClient && !this.shouldSkipProvider("groq")) {
+      const text = await withTimeout(this.callGroqForEntities(prompt), 6000, "Groq");
+      const parsed = text ? parseEntitiesJSON(text, message) : null;
+      if (parsed !== null) {
+        console.log(`[LLM Entities] Groq orqali: ${JSON.stringify(parsed)}`);
+        return parsed;
+      }
+    }
 
-  private getInstitutionCategoryLabel(categoryId: string): string | null {
-    if (categoryId === "3") return "davlat";
-    if (categoryId === "4") return "xususiy";
-    if (categoryId === "5") return "xalqaro";
+    // OpenRouter (zaxira — Groq limiti tugaganda)
+    if (this.openRouterClient && !this.shouldSkipProvider("openrouter")) {
+      const text = await withTimeout(this.callOpenRouterForEntities(prompt), 6000, "OpenRouter");
+      const parsed = text ? parseEntitiesJSON(text, message) : null;
+      if (parsed !== null) {
+        console.log(`[LLM Entities] OpenRouter orqali: ${JSON.stringify(parsed)}`);
+        return parsed;
+      }
+    }
+
+    // DeepSeek (zaxira — OpenRouter ham tugasa)
+    if (this.deepseekClient && !this.shouldSkipProvider("deepseek")) {
+      const text = await withTimeout(this.callDeepSeekForEntities(prompt), 6000, "DeepSeek");
+      const parsed = text ? parseEntitiesJSON(text, message) : null;
+      if (parsed !== null) {
+        console.log(`[LLM Entities] DeepSeek orqali: ${JSON.stringify(parsed)}`);
+        return parsed;
+      }
+    }
+
+    // Gemini (free backup)
+    if (this.geminiModel && !this.shouldSkipProvider("gemini")) {
+      const text = await withTimeout(this.callGeminiForEntities(prompt), 6000, "Gemini");
+      const parsed = text ? parseEntitiesJSON(text, message) : null;
+      if (parsed !== null) {
+        console.log(`[LLM Entities] Gemini orqali: ${JSON.stringify(parsed)}`);
+        return parsed;
+      }
+    }
+
+    // OpenAI (oxirgi)
+    if (this.openaiClient && !this.shouldSkipProvider("openai")) {
+      const text = await withTimeout(this.callOpenAIForEntities(prompt), 6000, "OpenAI");
+      const parsed = text ? parseEntitiesJSON(text, message) : null;
+      if (parsed !== null) {
+        console.log(`[LLM Entities] OpenAI orqali: ${JSON.stringify(parsed)}`);
+        return parsed;
+      }
+    }
+
+    console.warn("[LLM Entities] Hech qanday provider natija bermadi — rule-based saqlanadi");
     return null;
   }
 
+  /** Groq — structured JSON output (OpenAI-compatible) */
+  private async callGroqForEntities(prompt: string): Promise<string> {
+    if (!this.groqClient) throw new Error("Groq not initialized");
+    const completion = await this.groqClient.chat.completions.create({
+      model: process.env.GROQ_MODEL || "llama-3.3-70b-versatile",
+      messages: [
+        { role: "system", content: "You are a precise entity extractor. Respond with valid JSON only." },
+        { role: "user", content: prompt },
+      ],
+      temperature: 0,
+      max_tokens: 400,
+      response_format: { type: "json_object" },
+    });
+    return completion.choices[0]?.message?.content || "";
+  }
+
+  /** OpenRouter — structured JSON output (OpenAI-compatible) */
+  private async callOpenRouterForEntities(prompt: string): Promise<string> {
+    if (!this.openRouterClient) throw new Error("OpenRouter not initialized");
+    const completion = await this.openRouterClient.chat.completions.create({
+      model: process.env.OPENROUTER_MODEL || "openai/gpt-4o-mini",
+      messages: [
+        { role: "system", content: "You are a precise entity extractor. Respond with valid JSON only." },
+        { role: "user", content: prompt },
+      ],
+      temperature: 0,
+      max_tokens: 400,
+      response_format: { type: "json_object" },
+    });
+    return completion.choices[0]?.message?.content || "";
+  }
+
+  /** DeepSeek — structured JSON output (OpenAI-compatible) */
+  private async callDeepSeekForEntities(prompt: string): Promise<string> {
+    if (!this.deepseekClient) throw new Error("DeepSeek not initialized");
+    const completion = await this.deepseekClient.chat.completions.create({
+      model: process.env.DEEPSEEK_MODEL || "deepseek-v4-flash",
+      messages: [
+        { role: "system", content: "You are a precise entity extractor. Respond with valid JSON only." },
+        { role: "user", content: prompt },
+      ],
+      temperature: 0,
+      max_tokens: 400,
+      response_format: { type: "json_object" },
+    });
+    return completion.choices[0]?.message?.content || "";
+  }
+
+  /** Gemini — structured JSON output */
+  private async callGeminiForEntities(prompt: string): Promise<string> {
+    if (!this.geminiModel) throw new Error("Gemini not initialized");
+    const result = await this.geminiModel.generateContent({
+      contents: [{ role: "user", parts: [{ text: prompt }] }],
+      generationConfig: { responseMimeType: "application/json", temperature: 0, maxOutputTokens: 400 },
+    });
+    return result.response.text();
+  }
+
+  /** OpenAI — structured JSON output */
+  private async callOpenAIForEntities(prompt: string): Promise<string> {
+    if (!this.openaiClient) throw new Error("OpenAI not initialized");
+    const completion = await this.openaiClient.chat.completions.create({
+      model: process.env.LLM_MODEL || "gpt-4o-mini",
+      messages: [
+        { role: "system", content: "You are a precise entity extractor. Respond with valid JSON only." },
+        { role: "user", content: prompt },
+      ],
+      temperature: 0,
+      max_tokens: 400,
+      response_format: { type: "json_object" },
+    });
+    return completion.choices[0]?.message?.content || "";
+  }
+
+  /**
+   * AI'ni o'chirish tugmasi — API key'lar o'chirilmasdan template rejimda ishlash.
+   * `.env` da `AI_MODE=template` yoki `DISABLE_AI=true` bo'lsa provider'lar init
+   * qilinmaydi va barcha javoblar template (shablon) orqali qaytadi.
+   *
+   * Key'lar .env da turgani uchun boshqa vaqt `AI_MODE` ni o'chirish kifoya —
+   * AI yana ishlaydi.
+   */
+  isAIDisabled(): boolean {
+    const mode = (process.env.AI_MODE || "").trim().toLowerCase();
+    const disable = (process.env.DISABLE_AI || "").trim().toLowerCase();
+    return mode === "template" || mode === "off" || mode === "0" || disable === "true" || disable === "1";
+  }
+
   init() {
+    // AI o'chirilgan bo'lsa — provider'larni init QILMAYMIZ (template rejim)
+    if (this.isAIDisabled()) {
+      this.initialized = false;
+      console.log("[Provider] AI o'chirilgan (AI_MODE=template) — template rejim");
+      return;
+    }
+
     // Initialize Groq (OpenAI-compatible)
     if (process.env.GROQ_API_KEY) {
       this.groqClient = new OpenAI({
@@ -78,11 +293,41 @@ class ProviderManager {
       console.log("[Provider] Groq initialized");
     }
 
+    // Initialize OpenRouter (OpenAI-compatible, 100+ modellar)
+    if (process.env.OPENROUTER_API_KEY) {
+      this.openRouterClient = new OpenAI({
+        apiKey: process.env.OPENROUTER_API_KEY,
+        baseURL: "https://openrouter.ai/api/v1",
+        defaultHeaders: {
+          "HTTP-Referer": "https://mentalaba.uz",
+          "X-Title": "Mentalaba AI Agent",
+        },
+      });
+      if (!this.initialized) {
+        this.activeProvider = "openrouter";
+        this.initialized = true;
+      }
+      console.log("[Provider] OpenRouter initialized");
+    }
+
+    // Initialize DeepSeek (OpenAI-compatible, V4 modellar)
+    if (process.env.DEEPSEEK_API_KEY) {
+      this.deepseekClient = new OpenAI({
+        apiKey: process.env.DEEPSEEK_API_KEY,
+        baseURL: "https://api.deepseek.com",
+      });
+      if (!this.initialized) {
+        this.activeProvider = "deepseek";
+        this.initialized = true;
+      }
+      console.log("[Provider] DeepSeek initialized");
+    }
+
     // Initialize Gemini
     if (process.env.GEMINI_API_KEY) {
       const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
       this.geminiModel = genAI.getGenerativeModel({
-        model: process.env.GEMINI_MODEL || "gemini-2.0-flash",
+        model: process.env.GEMINI_MODEL || "gemini-2.5-flash",
       });
       if (!this.initialized) {
         this.activeProvider = "gemini";
@@ -108,12 +353,59 @@ class ProviderManager {
     }
   }
 
+  /**
+   * ANALYTICS WRAPPER (BOSQICH 7): har bir so'rov uchun
+   * intent/strategy/provider/latency/success/fallback/tool log qiladi.
+   */
   async generateResponse(
     userMessage: string,
     sessionContext: any,
     conversationHistory: ChatMessage[],
     language: "uz" | "ru" | "en" = "uz"
   ): Promise<{ content: string; intent?: string; toolUsed?: string; provider?: string }> {
+    const startedAt = Date.now();
+    let sessionId: string | undefined;
+    if (sessionContext && typeof sessionContext === "object" && "id" in sessionContext) {
+      sessionId = sessionContext.id;
+    }
+
+    const result = await this.generateResponseInner(userMessage, sessionContext, conversationHistory, language);
+
+    const strategy = getIntentResponseStrategy(result.intent || "");
+    const provider = result.provider || "none";
+    logAnalytics({
+      ts: new Date().toISOString(),
+      intent: result.intent || "unknown",
+      responseStrategy: strategy,
+      provider,
+      latencyMs: Date.now() - startedAt,
+      success: provider !== "none",
+      // Fallback: AI rejimda (llm/hybrid strategiya) lekin javob template bilan qaytdi
+      fallback: provider === "template" && strategy !== "template",
+      cached: provider === "cache",
+      tool: result.toolUsed || "none",
+      language,
+      sessionId,
+    });
+    return result;
+  }
+
+  async generateResponseInner(
+    userMessage: string,
+    sessionContext: any,
+    conversationHistory: ChatMessage[],
+    language: "uz" | "ru" | "en" = "uz"
+  ): Promise<{ content: string; intent?: string; toolUsed?: string; provider?: string }> {
+    // ✅ DEBUG LOGLAR - HAR BIR SO'ROVDA ISHLAYDI
+    console.log("=".repeat(60));
+    console.log("📝 [SESSION CONTEXT]:", JSON.stringify(sessionContext, null, 2));
+    console.log("-".repeat(60));
+    console.log("💬 [CONVERSATION HISTORY]:", JSON.stringify(conversationHistory, null, 2));
+    console.log("-".repeat(60));
+    console.log(`💬 [USER MESSAGE]: ${userMessage}`);
+    console.log(`🌐 [LANGUAGE]: ${language}`);
+    console.log("=".repeat(60));
+
     try {
       // Auto-initialize if not yet initialized
       if (!this.initialized) {
@@ -126,119 +418,49 @@ class ProviderManager {
       let intent = intentClassifier.classify(userMessage);
       let effectiveMessage = userMessage;
 
-      // Step 1.5: Follow-up detection
-      // MUHIM: faqat DATA intents (university_search, direction_search) uchun enhancement qilamiz.
-      // "so'nggi yangiliklar" -> news_search, "salom" -> greeting, "rahmat" -> faq kabi
-      // conversational intents da topicName ni qo'shish NOTO'G'RI natijaga olib keladi!
-      // Sababi: "Amity Universiteti so'nggi yangiliklar" -> university_search patterniga tushadi!
-      const nonEnhanceIntents = ["news_search", "greeting", "faq", "admission", "transfer"];
+      console.log(`[DEBUG] Initial intent: ${intent.intent}, entities:`, intent.entities);
 
-      const wordCount = userMessage.trim().split(/\s+/).length;
-      // MUHIM TUZATISH: agar joriy xabarning o'zida ANIQ universitet nomi bo'lsa
-      // (masalan foydalanuvchi yo'nalish haqida so'rab turib, to'satdan "Amity
-      // universiteti haqida ayt" desa), bu — MAVZU ALMASHISHI. Bunday holda eski
-      // sessionContext.currentTopicName ni yangi xabarga QO'SHMASLIK kerak, aks
-      // holda "Amity universiteti haqida ayt" xabari eski mavzu nomi bilan
-      // "EskiUniversitet Amity universiteti haqida ayt" bo'lib, ikkala universitet
-      // aralashib ketadi va noto'g'ri natija chiqadi.
-      const isTopicSwitch = !!intent.entities?.university;
-      if (wordCount < 8 && !nonEnhanceIntents.includes(intent.intent) && !isTopicSwitch) {
-        // Topic nomini aniqlash (sessionContext -> conversation history)
-        let topicName = sessionContext?.currentTopicName as string | undefined;
-        if ((!topicName || topicName.length <= 3) && conversationHistory?.length > 0) {
-          const lastAsst = [...conversationHistory].reverse().find(m => m.role === "assistant");
-          if (lastAsst?.content) {
-            topicName = lastAsst.content.match(/## 🏛 ([^\n]+)/)?.[1]?.trim()
-              || lastAsst.content.match(/### 📚 ([^\n]+) yo'nalishlari/i)?.[1]?.trim();
-          }
-        }
-
-        // Agar topic nomi topilgan bo'lsa va message da o'sha nom YO'Q bo'lsa
-        if (topicName && topicName.length > 3) {
-          const msgLower = userMessage.toLowerCase();
-          const topicLower = topicName.toLowerCase();
-          // University name hali message da yo'qmi? (agar bo'lsa, takrorlash kerak emas)
-          const hasUniName = msgLower.includes(topicLower) ||
-            topicLower.split(' ').some((part: string) => part.length > 4 && msgLower.includes(part));
-
-          if (!hasUniName) {
-            const enhanced = `${topicName} ${userMessage}`;
-            effectiveMessage = enhanced;
-            intent = intentClassifier.classify(enhanced);
-            console.log(`[FollowUp] Enhanced "${userMessage}" -> "${effectiveMessage}" -> ${intent.intent}`);
-          }
-        }
-
-        if (sessionContext?.currentRegion || sessionContext?.currentInstitutionCategory || sessionContext?.currentDirectionCategory) {
-          const additions: string[] = [];
-          if (sessionContext.currentRegion && !this.hasRegionMention(effectiveMessage)) {
-            const regionName = lookupManager.getRegionName(parseInt(sessionContext.currentRegion), language);
-            if (regionName) additions.push(regionName);
-          }
-          if (sessionContext.currentInstitutionCategory && !this.hasCategoryMention(effectiveMessage)) {
-            const categoryLabel = this.getInstitutionCategoryLabel(sessionContext.currentInstitutionCategory);
-            if (categoryLabel) additions.push(categoryLabel);
-          }
-          if (sessionContext.currentDirectionCategory && !this.hasDirectionMention(effectiveMessage)) {
-            additions.push(sessionContext.currentDirectionCategory);
-          }
-          if (additions.length > 0) {
-            const enhanced = `${additions.join(' ')} ${effectiveMessage}`;
-            effectiveMessage = enhanced;
-            intent = intentClassifier.classify(enhanced);
-            console.log(`[FollowUp] Session context augmented "${userMessage}" -> "${effectiveMessage}" -> ${intent.intent}`);
-          }
-        }
+      // Step 1.5: Follow-up detection (BOSQICH 3 — Context Manager)
+      // follow-up-context.ts moduli: region/category/direction/degree/language/byudjet
+      // kontekstini to'playdi va qisqa follow-up so'rovlarga qo'shadi.
+      // "Toshkentdagi universitetlar → ITlari → Davlatlari" zanjiri shu yerda ishlaydi.
+      const followUp = augmentFollowUp(userMessage, sessionContext, conversationHistory, language);
+      if (followUp.augmented) {
+        effectiveMessage = followUp.effectiveMessage;
+        intent = followUp.intent;
       }
 
-      // Step 2: Execute tools
-      let toolResults: any[] = [];
-      try {
-        toolResults = await toolRouter.execute(intent, sessionContext, effectiveMessage);
-      } catch (error) {
-        console.error("[Tool Error]", error);
+      // Continuous Profile Update: foydalanuvchining har bir ma'lumoti session profiliga yozib boriladi
+      if (sessionContext) {
+        sessionContext.recommendationProfile = updateRecommendationProfile(
+          sessionContext.recommendationProfile || {},
+          userMessage,
+          intent.entities
+        );
       }
 
-      // Step 3: DATA intents
-      // MUHIM: agar tool HAQIQIY ma'lumot topgan bo'lsa (bo'sh emas), endi qattiq
-      // shablon o'rniga AI'ning o'ziga beramiz — u context'dagi HAQIQIY ma'lumotni
-      // (universitet tavsifi, narxi, kontakti va h.k.) tabiiy, savolga moslashtirilgan
-      // tilda taqdim etadi. Hallucination xavfi yo'q, chunki system prompt AI'ga
-      // faqat context'dagi ma'lumotdan foydalanishni qattiq talab qiladi.
-      // Faqat ma'lumot UMUMAN topilmagan hollarda (bo'sh natija, xato) shablonga
-      // tushamiz — bu holatda AI o'ylab topib qo'yishi mumkin, shablon esa xavfsiz
-      // "topilmadi" javobini beradi.
-      const dataIntents = ["university_search", "direction_search", "grant_search", "comparison", "recommendation"];
-      const isDataIntent = dataIntents.includes(intent.intent);
-      const hasRealData = toolResults.some((r: any) => {
-        if (!r.success || !r.data) return false;
-        if (Array.isArray(r.data)) return r.data.length > 0;
-        if (typeof r.data === "object") {
-          const arrays = Object.values(r.data).filter((v: any) => Array.isArray(v));
-          if (arrays.some((a: any) => a.length > 0)) return true;
-          if ((r.data as any).needsClarification) return true;
-          if ((r.data as any).id) return true;
-          if ((r.data as any).universityOverview || (r.data as any).regionOverview) return true;
-          return false;
-        }
-        return false;
-      });
+      console.log(`[DEBUG] Final intent: ${intent.intent}, secondaryIntents:`, intent.secondaryIntents, `, effectiveMessage: ${effectiveMessage}`);
 
-      if (isDataIntent && !hasRealData) {
-        // Ma'lumot topilmadi — xavfsiz shablon javobi (AI o'ylab topmasin)
-        const content = this.getTemplateResponse(intent.intent, toolResults, userMessage, language);
-        return {
-          content,
-          intent: intent.intent,
-          toolUsed: toolResults.length > 0 ? toolResults.map((r: any) => r.tool).filter(Boolean).join(", ") : "none",
-          provider: "template",
-        };
-      }
-
-      // Step 3.5: GREETING -> TEMPLATE
-      // AI provider "salom" desa universitet haqida gapirib yuboradi, template to'g'ri salomlashadi
-      if (intent.intent === "greeting") {
-        const content = this.getTemplateResponse(intent.intent, toolResults, userMessage, language);
+      // Step 1.55: FIELD CLARIFICATION (BOSQICH 12 — user qoidasi 8)
+      // "Kontrakti qancha?" kabi BARE field so'rovi + lastUniversity YO'Q bo'lsa
+      // → tool ishlamaydi (taxmin qilmaydi), agent qaysi universitеt nazarda
+      // tutilganini so'raydi. Aks holda barcha universitеtlarning umumiy
+      // narxi chiqib ketardi ("PDP chi? → uning narxlari qancha?" zanjiri esa
+      // lastUniversity orqali allaqachon ishlaydi — bu yerda faqat CONTEXT'SIZ
+      // bare so'rov tutib olinadi).
+      const fieldRequest = detectRequestField(effectiveMessage);
+      const hasUniversityContext =
+        !!intent.entities?.university ||
+        !!sessionContext?.lastUniversity ||
+        (sessionContext?.lastRecommendations?.length ?? 0) > 0;
+      if (
+        fieldRequest &&
+        fieldRequest !== "summary" &&
+        isBareFieldRequest(effectiveMessage) &&
+        !hasUniversityContext
+      ) {
+        const content = universityClarificationResponse(requestFieldLabel(fieldRequest), language);
+        console.log(`[FieldClarification] "${userMessage}" — ${fieldRequest} so'raldi, lekin universitеt konteksti yo'q → so'raldi`);
         return {
           content,
           intent: intent.intent,
@@ -247,9 +469,145 @@ class ProviderManager {
         };
       }
 
-      // No provider configured -> use template (even for conversational)
-      if (!this.initialized) {
-        const content = this.getTemplateResponse(intent.intent, toolResults, userMessage, language);
+      // Step 1.6: CACHE LAYER (BOSQICH 7)
+      // Template strategiya (deterministik) javoblarni memory cache dan tekshiramiz.
+      // Faqat dataIntent bo'lgan intent'lar cache qilinadi (greeting/thanks emas).
+      // Cache HIT bo'lsa — tool chaqirilmaydi (API yuki tejaladi).
+      const cacheStrategy = getIntentResponseStrategy(intent.intent);
+      const cacheKey = responseCache.buildKey(intent.intent, effectiveMessage, language);
+      const cachedEntry = responseCache.get(cacheKey);
+      if (cachedEntry && cacheStrategy === "template" && getIntentDataFlag(intent.intent)) {
+        console.log(`[Cache] HIT: ${cacheKey} (provider=${cachedEntry.provider})`);
+        return {
+          content: cachedEntry.content,
+          intent: cachedEntry.intent,
+          toolUsed: cachedEntry.toolUsed,
+          provider: "cache",
+        };
+      }
+
+      // Step 1.7: BOSQICH 5 — LLM-assisted entity refinement
+      // Provider mavjud bo'lsa va entity'lar muhim intent bo'lsa (data intent /
+      // qabul/transfer), message'dan entity'lar LLM orqali aniqroq aniqlanadi va
+      // rule-based natija bilan birlashtiriladi. Xato/timeout bo'lsa rule-based
+      // natija saqlanadi (fallback) — agent hech qachon buzilmaydi.
+      //
+      // RESPONSE STRATEGY (BOSQICH 6) OPTIMIZATSIYASI: javob TEMPLATE orqali
+      // qaytadigan intent'lar (responseStrategy="template") uchun LLM entity
+      // extraction ham chaqirilmaydi — javob template bo'ladi, rule-based
+      // entity'lar yetarli. Shunda token 90-95% tejaladi (entity extraction +
+      // response chaqiruvi ikkalasi ham ketmaydi). Faqat "llm" / "hybrid"
+      // strategy (recommendation, comparison) va admission/transfer uchun
+      // LLM extraction ishlaydi.
+      let responseStrategy = getIntentResponseStrategy(intent.intent);
+      // RESPONSE STRATEGY OVERRIDE (Fix): direction_search + kasb/istek so'zi → hybrid.
+      // "Men AI bo'yicha ishlamoqchiman" — oddiy yo'nalish katalogi EMAS, shaxsiy
+      // maslahat. Template "mana IT yo'nalishlari" deyishi o'rniga LLM nega aynan
+      // shu yo'nalish mosligini tushuntiradi. "IT yo'nalishlari" (oddiy katalog)
+      // esa template qoladi — kasb/istek so'zi yo'q.
+      //
+      // MUHIM: faqat direction_search intent uchun va message da kasb/istek/maqsad
+      // so'zlari bo'lsa. Negativ: "yo'nalish(lar)i", "ro'yxati", "mavjud" kabi
+      // katalog so'zlari bo'lsa — template qoladi.
+      if (intent.intent === "direction_search" &&
+          /\b(bo'lmoqchiman|ishlamoqchiman|qiziqaman|qiziqtiradi|yoqadi|yaxshi ko'raman|o'qimoqchiman|o'rganmoqchiman|kirmoqchiman|maqsadim|orzuim)\b/i.test(effectiveMessage) &&
+          !/\b(yo'nalish(?:lar|lari|larini|lariga|laridan|larining)?|ro'yxati|mavjud|katalogi)\b/i.test(effectiveMessage)) {
+        responseStrategy = "hybrid";
+        console.log(`[StrategyOverride] direction_search → hybrid (kasb/istek so'zi): "${effectiveMessage.substring(0, 60)}"`);
+      }
+      const needsLlm = responseStrategy === "llm" || responseStrategy === "hybrid";
+      // TODO (future): "hybrid" hozircha "llm" yo'nalishiga boradi (API data +
+      // LLM tahlil) — keyingi bosqichda template struktura + LLM matn aralashmasi
+      // qo'shiladi. Hozircha farq yo'q, lekin log aniq ko'rsatsin:
+      console.log(`[DEBUG] Response strategy: ${responseStrategy} (intent=${intent.intent})`);
+      if (this.initialized && needsLlm) {
+        // Katalog intent'lari (*_list) o'z-o'zidan to'liq — entity'lar qo'shimcha
+        // qiymat bermaydi, LLM chaqiruvi tejaladi.
+        const isEntityRelevant =
+          (getIntentDataFlag(intent.intent) && !intent.intent.endsWith("_list")) ||
+          intent.intent === "admission" || intent.intent === "transfer";
+        if (isEntityRelevant) {
+          const ruleBased = { ...intent.entities };
+          const llmEntities = await this.extractEntitiesWithLLM(effectiveMessage, language);
+          if (llmEntities) {
+            // MUHIM (reviewer): konfliktda RULE-BASED yutadi — LLM hallucination
+            // (message'da yo'q region/degree uydirib qo'shish) xavfini oldini oladi.
+            // LLM faqat rule-based TOPA OLMAGAN bo'shliqlarni to'ldiradi.
+            // Real benchmark'dan keyin istalgan kalit uchun LLM ustunligini
+            // yoqish mumkin (masalan direction — rule-based false positive'lari bor).
+            //
+            // MUHIM (Fix): LLM degree'ni faqat message'da ANIQ akademik daraja
+            // so'zi bo'lsa qabul qilamiz. "doktor bo'lmoqchiman" da LLM "phd"
+            // deb xato talqin qilishi mumkin (doktor = shifokor kasbi, doktorantura
+            // emas!). Xuddi shunday language/educationType ham faqat aniq so'z
+            // bo'lsa qabul qilinadi — LLM taxmin qilmasin.
+            const explicitDegreeWord = /\b(bakalavr|bakalavriat|bachelor|magistr|magistratura|master|doktorantura|doktoranturada|phd|doctor of science)\b/i.test(effectiveMessage);
+            const explicitLangWord = /\b(ingliz|rus|o'zbek|english|russian|uzbek)\b/i.test(effectiveMessage);
+            const explicitETWord = /\b(kunduzgi|sirtqi|kechki|masofaviy|full-?time|part-?time|distance)\b/i.test(effectiveMessage);
+            const filteredLlm = { ...llmEntities };
+            if (filteredLlm.degree !== undefined && !ruleBased.degree && !explicitDegreeWord) {
+              delete filteredLlm.degree;
+            }
+            if (filteredLlm.language !== undefined && !ruleBased.language && !explicitLangWord) {
+              delete filteredLlm.language;
+            }
+            if (filteredLlm.educationType !== undefined && !ruleBased.educationType && !explicitETWord) {
+              delete filteredLlm.educationType;
+            }
+            intent.entities = { ...filteredLlm, ...ruleBased };
+            console.log(`[LLM Entities] rule=${JSON.stringify(ruleBased)} llm=${JSON.stringify(llmEntities)} merged=${JSON.stringify(intent.entities)}`);
+          }
+        }
+      }
+
+      // Step 2: Execute tools
+      let toolResults: any[] = [];
+      try {
+        toolResults = await toolRouter.execute(intent, sessionContext, effectiveMessage);
+        console.log(`[DEBUG] Tool results: ${toolResults.length} results`);
+        if (toolResults.length > 0) {
+          console.log(`[DEBUG] First tool result:`, JSON.stringify(toolResults[0], null, 2));
+        }
+      } catch (error) {
+        console.error("[Tool Error]", error);
+      }
+
+      // Step 3: DATA intents
+      // BOSQICH 4 (JSON-driven config): dataIntent flag'i intent-config.json dan
+      // o'qiladi — yangi intent qo'shishda provider-manager kodiga tegish shart emas.
+      // dataIntent=true bo'lgan intent'lar: data bo'lmasa template fallback ishlatadi
+      // (AI hallucination oldini oladi).
+      const isDataIntent = getIntentDataFlag(intent.intent);
+      const hasRealData = toolResults.some((r: any) => {
+        if (!r.success || !r.data) return false;
+        if (Array.isArray(r.data)) return r.data.length > 0;
+        if (typeof r.data === "object") {
+          const d = r.data as any;
+          const arrays = Object.values(d).filter((v: any) => Array.isArray(v));
+          if (arrays.some((a: any) => a.length > 0)) return true;
+          if (d.needsClarification) return true;
+          if (d.id) return true;
+          if (d.universityOverview || d.regionOverview) return true;
+          // search_tuition natijasi: { hasData: true, universities: [...] }
+          if (d.hasData === true && Array.isArray(d.universities) && d.universities.length > 0) return true;
+          // list_directions natijasi: { categories: [...] }
+          if (Array.isArray(d.categories) && d.categories.length > 0) return true;
+          return false;
+        }
+        return false;
+      });
+
+      console.log(`[DEBUG] isDataIntent: ${isDataIntent}, hasRealData: ${hasRealData}`);
+
+      // MUHIM (Fix): recommend tool needsClarification qaytarsa ("tanlasam",
+      // "bilmayman" kabi maslahat so'rovlarida ma'lumot yetishmaydi) — uni LLM'ga
+      // yuborish NOTO'G'RI: LLM o'zi "topilmadi" deb yozib yuboradi. To'g'risi:
+      // template clarification SAVOLLARINI ko'rsatadi ("Qaysi shahar? Qanday
+      // yo'nalish? Davlatmi yoki xususiy?") — keyingi javobga asos bo'ladi.
+      const needsClarification = toolResults.some((r: any) => r.data?.needsClarification === true);
+      if (needsClarification) {
+        const content = this.getTemplateResponse(intent.intent, toolResults, userMessage, language, intent.entities, intent.entityConfidence);
+        console.log(`[DEBUG] needsClarification=true — template clarification savollari ishlatiladi`);
         return {
           content,
           intent: intent.intent,
@@ -258,18 +616,123 @@ class ProviderManager {
         };
       }
 
-      // CONVERSATIONAL INTENT or NO DATA -> use AI model
+      if (isDataIntent && !hasRealData) {
+        const content = this.getTemplateResponse(intent.intent, toolResults, userMessage, language, intent.entities, intent.entityConfidence);
+        console.log(`[DEBUG] Using template response (no data found)`);
+        // CACHE: "topilmadi" javoblari ham cache qilinadi — takroriy bo'sh so'rovlar API'ga bormaydi
+        if (cacheStrategy === "template") {
+          responseCache.set(cacheKey, {
+            content,
+            provider: "template",
+            toolUsed: toolResults.length > 0 ? toolResults.map((r: any) => r.tool).filter(Boolean).join(", ") : "none",
+            intent: intent.intent,
+          });
+          console.log(`[Cache] SET (no data): ${cacheKey}`);
+        }
+        return {
+          content,
+          intent: intent.intent,
+          toolUsed: toolResults.length > 0 ? toolResults.map((r: any) => r.tool).filter(Boolean).join(", ") : "none",
+          provider: "template",
+        };
+      }
+
+      if (intent.intent === "greeting") {
+        const content = this.getTemplateResponse(intent.intent, toolResults, userMessage, language);
+        console.log(`[DEBUG] Using template response (greeting)`);
+        return {
+          content,
+          intent: intent.intent,
+          toolUsed: "none",
+          provider: "template",
+        };
+      }
+
+      // ============================================================
+      // RESPONSE STRATEGY (BOSQICH 6): data intent + data bor → TEMPLATE (0 token)
+      // ============================================================
+      // Sizning arxitektura taklifingiz: AI faqat reasoning talab qiladigan
+      // intent'larda ishlatiladi (responseStrategy="llm": recommendation,
+      // comparison). Oddiy ma'lumot qidiruv (university_search, direction_search,
+      // tuition_search, grant_search, news_search, *_list, university_detail)
+      // template orqali javob beradi — LLM chaqirilmaydi.
+      //
+      // Natija: token 90-95% tejaladi, javoblar tezroq, API limitlari kam tugaydi.
+      // (responseStrategy Step 1.7 da e'lon qilingan — bu yerda qayta e'lon qilinmaydi)
+      if (isDataIntent && hasRealData && responseStrategy === "template") {
+        const content = this.getTemplateResponse(intent.intent, toolResults, userMessage, language, intent.entities, intent.entityConfidence);
+        console.log(`[DEBUG] Using template response (data intent, strategy=template) — LLM chaqirilmadi`);
+        // CACHE LAYER: template javobni cache ga yozamiz — keyingi bir xil so'rov API'ga bormaydi
+        responseCache.set(cacheKey, {
+          content,
+          provider: "template",
+          toolUsed: toolResults.length > 0 ? toolResults.map((r: any) => r.tool).filter(Boolean).join(", ") : "none",
+          intent: intent.intent,
+        });
+        console.log(`[Cache] SET: ${cacheKey}`);
+        return {
+          content,
+          intent: intent.intent,
+          toolUsed: toolResults.length > 0 ? toolResults.map((r: any) => r.tool).filter(Boolean).join(", ") : "none",
+          provider: "template",
+        };
+      }
+
+      // ============================================================
+      // HYBRID ENGINE (BOSQICH 7): API data + LLM tahlil
+      // ============================================================
+      // responseStrategy="hybrid" bo'lgan intent'lar (recommendation, comparison):
+      // API ma'lumotlari (kompakt — faqat kerakli maydonlar) LLM'ga beriladi,
+      // LLM "nega aynan shular" tahlilini yozadi. LLM muvaffaqiyatsiz bo'lsa →
+      // template fallback (agent buzilmaydi).
+      if (isDataIntent && hasRealData && responseStrategy === "hybrid" && this.initialized) {
+        const hybridResult = await this.tryHybridResponse(intent, toolResults, conversationHistory, userMessage, language);
+        if (hybridResult !== null) {
+          console.log(`[DEBUG] HYBRID response (compact data + LLM analysis) via ${hybridResult.provider}`);
+          return {
+            content: hybridResult.content,
+            intent: intent.intent,
+            toolUsed: toolResults.length > 0 ? toolResults.map((r: any) => r.tool).filter(Boolean).join(", ") : "none",
+            provider: hybridResult.provider,
+          };
+        }
+        // LLM muvaffaqiyatsiz → template fallback
+        const content = this.getTemplateResponse(intent.intent, toolResults, userMessage, language, intent.entities, intent.entityConfidence);
+        console.log(`[DEBUG] HYBRID LLM failed — using template fallback`);
+        return {
+          content,
+          intent: intent.intent,
+          toolUsed: toolResults.length > 0 ? toolResults.map((r: any) => r.tool).filter(Boolean).join(", ") : "none",
+          provider: "template",
+        };
+      }
+
+      if (!this.initialized) {
+        const content = this.getTemplateResponse(intent.intent, toolResults, userMessage, language, intent.entities, intent.entityConfidence);
+        console.log(`[DEBUG] Using template response (no provider)`);
+        return {
+          content,
+          intent: intent.intent,
+          toolUsed: toolResults.length > 0 ? toolResults.map((r: any) => r.tool).filter(Boolean).join(", ") : "none",
+          provider: "template",
+        };
+      }
+
       // Build context for AI
       const systemPrompt = contextBuilder.buildSystemPrompt(language);
       const context = contextBuilder.buildContext(toolResults, sessionContext, language);
 
+      console.log(`[DEBUG] System prompt length: ${systemPrompt.length}, Context length: ${context.length}`);
+
       // Try providers in order
       const errors: string[] = [];
 
-      // Try Groq first (fastest, free)
-      if (this.groqClient) {
+      // Try Groq first (fastest, free) — limit xatosi bo'lsa circuit breaker ishlaydi
+      if (this.groqClient && !this.shouldSkipProvider("groq")) {
         try {
+          console.log(`[DEBUG] Trying Groq...`);
           const result = await this.callGroq(systemPrompt, context, conversationHistory, userMessage);
+          console.log(`[DEBUG] Groq response successful`);
           return {
             ...result,
             intent: intent.intent,
@@ -279,13 +742,54 @@ class ProviderManager {
         } catch (error: any) {
           errors.push(`Groq: ${error.message}`);
           console.error("[Groq Error]", error);
+          if (this.isLimitError(error)) this.openCircuit("groq");
+        }
+      }
+
+      // Try OpenRouter next (zaxira — Groq limiti tugaganda ishlaydi)
+      if (this.openRouterClient && !this.shouldSkipProvider("openrouter")) {
+        try {
+          console.log(`[DEBUG] Trying OpenRouter...`);
+          const result = await this.callOpenRouter(systemPrompt, context, conversationHistory, userMessage);
+          console.log(`[DEBUG] OpenRouter response successful`);
+          return {
+            ...result,
+            intent: intent.intent,
+            toolUsed: toolResults.length > 0 ? toolResults.map((r: any) => r.tool).filter(Boolean).join(", ") : "none",
+            provider: "openrouter",
+          };
+        } catch (error: any) {
+          errors.push(`OpenRouter: ${error.message}`);
+          console.error("[OpenRouter Error]", error);
+          if (this.isLimitError(error)) this.openCircuit("openrouter");
+        }
+      }
+
+      // Try DeepSeek next (zaxira — OpenRouter ham tugasa)
+      if (this.deepseekClient && !this.shouldSkipProvider("deepseek")) {
+        try {
+          console.log(`[DEBUG] Trying DeepSeek...`);
+          const result = await this.callDeepSeek(systemPrompt, context, conversationHistory, userMessage);
+          console.log(`[DEBUG] DeepSeek response successful`);
+          return {
+            ...result,
+            intent: intent.intent,
+            toolUsed: toolResults.length > 0 ? toolResults.map((r: any) => r.tool).filter(Boolean).join(", ") : "none",
+            provider: "deepseek",
+          };
+        } catch (error: any) {
+          errors.push(`DeepSeek: ${error.message}`);
+          console.error("[DeepSeek Error]", error);
+          if (this.isLimitError(error)) this.openCircuit("deepseek");
         }
       }
 
       // Try Gemini next (free, backup)
       if (this.geminiModel) {
         try {
+          console.log(`[DEBUG] Trying Gemini...`);
           const result = await this.callGemini(systemPrompt, context, conversationHistory, userMessage);
+          console.log(`[DEBUG] Gemini response successful`);
           return {
             ...result,
             intent: intent.intent,
@@ -301,7 +805,9 @@ class ProviderManager {
       // Try OpenAI last
       if (this.openaiClient) {
         try {
+          console.log(`[DEBUG] Trying OpenAI...`);
           const result = await this.callOpenAI(systemPrompt, context, conversationHistory, userMessage);
+          console.log(`[DEBUG] OpenAI response successful`);
           return {
             ...result,
             intent: intent.intent,
@@ -316,7 +822,7 @@ class ProviderManager {
 
       // All providers failed, use template fallback
       console.error("[Provider] All providers failed:", errors.join("; "));
-      const content = this.getTemplateResponse(intent.intent, toolResults, userMessage, language);
+      const content = this.getTemplateResponse(intent.intent, toolResults, userMessage, language, intent.entities, intent.entityConfidence);
       return {
         content,
         intent: intent.intent,
@@ -332,6 +838,118 @@ class ProviderManager {
         provider: "none",
       };
     }
+  }
+
+  /**
+   * HYBRID ENGINE (BOSQICH 7): API data + LLM tahlil.
+   *
+   * Tool natijalaridan KOMPAKT context (faqat kerakli maydonlar — buildCompactContext)
+   * quriladi va LLM'ga yuboriladi. LLM "nega aynan shular" tahlilini yozadi.
+   * Muvaffaqiyatsiz (xato/timeout/bo'sh) → null qaytaradi (template fallback).
+   *
+   * PROMPT OPTIMIZATSIYA: butun API JSON'ini emas, faqat nom/joy/narx/grant
+   * kabi tavsiya qaroriga ta'sir qiladigan maydonlar yuboriladi (token 3-5x kam).
+   */
+  /**
+   * HYBRID ENGINE — muvaffaqiyatli provider nomini ham qaytaradi
+   * (analytics to'g'ri ko'rsatsin: Groq emas, balki haqiqiy javob bergan provider).
+   */
+  private async tryHybridResponse(
+    intent: IntentResult,
+    toolResults: any[],
+    conversationHistory: ChatMessage[],
+    userMessage: string,
+    language: "uz" | "ru" | "en"
+  ): Promise<{ content: string; provider: string } | null> {
+    const compactContext = buildCompactContext(toolResults as any);
+    if (!compactContext.trim()) {
+      console.log("[Hybrid] Kompakt context bo'sh — template ishlatiladi");
+      return null;
+    }
+
+    const systemPrompt = contextBuilder.buildSystemPrompt(language);
+    const errors: string[] = [];
+
+    // Groq birinchi — limit xatosi bo'lsa circuit breaker ishlaydi
+    if (this.groqClient && !this.shouldSkipProvider("groq")) {
+      try {
+        console.log(`[Hybrid] Trying Groq (compact context: ${compactContext.length} chars)`);
+        const result = await this.callGroq(systemPrompt, compactContext, conversationHistory, userMessage);
+        if (result.content && result.content.trim().length > 20) {
+          console.log(`[Hybrid] Groq response successful`);
+          return { content: result.content, provider: "groq" };
+        }
+      } catch (error: any) {
+        errors.push(`Groq: ${error.message}`);
+        console.error("[Hybrid Groq Error]", error);
+        if (this.isLimitError(error)) this.openCircuit("groq");
+      }
+    }
+
+    // OpenRouter backup (Groq limiti tugaganda)
+    if (this.openRouterClient && !this.shouldSkipProvider("openrouter")) {
+      try {
+        console.log(`[Hybrid] Trying OpenRouter`);
+        const result = await this.callOpenRouter(systemPrompt, compactContext, conversationHistory, userMessage);
+        if (result.content && result.content.trim().length > 20) {
+          console.log(`[Hybrid] OpenRouter response successful`);
+          return { content: result.content, provider: "openrouter" };
+        }
+      } catch (error: any) {
+        errors.push(`OpenRouter: ${error.message}`);
+        console.error("[Hybrid OpenRouter Error]", error);
+        if (this.isLimitError(error)) this.openCircuit("openrouter");
+      }
+    }
+
+    // DeepSeek backup (OpenRouter ham tugasa)
+    if (this.deepseekClient && !this.shouldSkipProvider("deepseek")) {
+      try {
+        console.log(`[Hybrid] Trying DeepSeek`);
+        const result = await this.callDeepSeek(systemPrompt, compactContext, conversationHistory, userMessage);
+        if (result.content && result.content.trim().length > 20) {
+          console.log(`[Hybrid] DeepSeek response successful`);
+          return { content: result.content, provider: "deepseek" };
+        }
+      } catch (error: any) {
+        errors.push(`DeepSeek: ${error.message}`);
+        console.error("[Hybrid DeepSeek Error]", error);
+        if (this.isLimitError(error)) this.openCircuit("deepseek");
+      }
+    }
+
+    // Gemini backup
+    if (this.geminiModel) {
+      try {
+        console.log(`[Hybrid] Trying Gemini`);
+        const result = await this.callGemini(systemPrompt, compactContext, conversationHistory, userMessage);
+        if (result.content && result.content.trim().length > 20) {
+          console.log(`[Hybrid] Gemini response successful`);
+          return { content: result.content, provider: "gemini" };
+        }
+      } catch (error: any) {
+        errors.push(`Gemini: ${error.message}`);
+        console.error("[Hybrid Gemini Error]", error);
+      }
+    }
+
+    // OpenAI oxirgi
+    if (this.openaiClient) {
+      try {
+        console.log(`[Hybrid] Trying OpenAI`);
+        const result = await this.callOpenAI(systemPrompt, compactContext, conversationHistory, userMessage);
+        if (result.content && result.content.trim().length > 20) {
+          console.log(`[Hybrid] OpenAI response successful`);
+          return { content: result.content, provider: "openai" };
+        }
+      } catch (error: any) {
+        errors.push(`OpenAI: ${error.message}`);
+        console.error("[Hybrid OpenAI Error]", error);
+      }
+    }
+
+    console.error(`[Hybrid] All providers failed: ${errors.join("; ")}`);
+    return null;
   }
 
   private async callGroq(
@@ -350,7 +968,13 @@ class ProviderManager {
       messages.push({ role: "system", content: `Context:\n${context}` });
     }
 
-    for (const msg of conversationHistory.slice(-8)) {
+    // BOSQICH 14 (Conversation Snapshot): uzoq suhbatlarda eski xabarlar
+    // qisqartiriladi (1-qator, 100 belgi) — token tejaydi, kontekst saqlanadi.
+    // REVIEWER FIX: qisqa suhbatlarda (<=12 xabar) snapshot hech narsani
+    // o'zgartirmaydi — slice(-8) 8 ta TO'LIQ xabar beradi (avvalgidek).
+    // Faqat 12+ xabarlik uzoq suhbatlarda eski xabarlar qisqartiriladi.
+    const historyForLlm = buildSnapshotHistory(conversationHistory).slice(-8);
+    for (const msg of historyForLlm) {
       if (msg.role !== "system") {
         messages.push({ role: msg.role as "user" | "assistant", content: msg.content });
       }
@@ -360,6 +984,90 @@ class ProviderManager {
 
     const completion = await this.groqClient.chat.completions.create({
       model: process.env.GROQ_MODEL || "llama-3.3-70b-versatile",
+      messages: messages as any,
+      temperature: 0.3,
+      max_tokens: 1024,
+    });
+
+    return {
+      content: completion.choices[0]?.message?.content || "Kechirasiz, javob yaratishda xatolik yuz berdi.",
+    };
+  }
+
+  private async callOpenRouter(
+    systemPrompt: string,
+    context: string,
+    conversationHistory: ChatMessage[],
+    userMessage: string
+  ): Promise<{ content: string }> {
+    if (!this.openRouterClient) throw new Error("OpenRouter not initialized");
+
+    const messages: Array<{ role: "system" | "user" | "assistant"; content: string }> = [
+      { role: "system", content: systemPrompt },
+    ];
+
+    if (context) {
+      messages.push({ role: "system", content: `Context:\n${context}` });
+    }
+
+    // BOSQICH 14 (Conversation Snapshot): uzoq suhbatlarda eski xabarlar
+    // qisqartiriladi (1-qator, 100 belgi) — token tejaydi, kontekst saqlanadi.
+    // REVIEWER FIX: qisqa suhbatlarda (<=12 xabar) snapshot hech narsani
+    // o'zgartirmaydi — slice(-8) 8 ta TO'LIQ xabar beradi (avvalgidek).
+    // Faqat 12+ xabarlik uzoq suhbatlarda eski xabarlar qisqartiriladi.
+    const historyForLlm = buildSnapshotHistory(conversationHistory).slice(-8);
+    for (const msg of historyForLlm) {
+      if (msg.role !== "system") {
+        messages.push({ role: msg.role as "user" | "assistant", content: msg.content });
+      }
+    }
+
+    messages.push({ role: "user", content: userMessage });
+
+    const completion = await this.openRouterClient.chat.completions.create({
+      model: process.env.OPENROUTER_MODEL || "openai/gpt-4o-mini",
+      messages: messages as any,
+      temperature: 0.3,
+      max_tokens: 1024,
+    });
+
+    return {
+      content: completion.choices[0]?.message?.content || "Kechirasiz, javob yaratishda xatolik yuz berdi.",
+    };
+  }
+
+  private async callDeepSeek(
+    systemPrompt: string,
+    context: string,
+    conversationHistory: ChatMessage[],
+    userMessage: string
+  ): Promise<{ content: string }> {
+    if (!this.deepseekClient) throw new Error("DeepSeek not initialized");
+
+    const messages: Array<{ role: "system" | "user" | "assistant"; content: string }> = [
+      { role: "system", content: systemPrompt },
+    ];
+
+    if (context) {
+      messages.push({ role: "system", content: `Context:\n${context}` });
+    }
+
+    // BOSQICH 14 (Conversation Snapshot): uzoq suhbatlarda eski xabarlar
+    // qisqartiriladi (1-qator, 100 belgi) — token tejaydi, kontekst saqlanadi.
+    // REVIEWER FIX: qisqa suhbatlarda (<=12 xabar) snapshot hech narsani
+    // o'zgartirmaydi — slice(-8) 8 ta TO'LIQ xabar beradi (avvalgidek).
+    // Faqat 12+ xabarlik uzoq suhbatlarda eski xabarlar qisqartiriladi.
+    const historyForLlm = buildSnapshotHistory(conversationHistory).slice(-8);
+    for (const msg of historyForLlm) {
+      if (msg.role !== "system") {
+        messages.push({ role: msg.role as "user" | "assistant", content: msg.content });
+      }
+    }
+
+    messages.push({ role: "user", content: userMessage });
+
+    const completion = await this.deepseekClient.chat.completions.create({
+      model: process.env.DEEPSEEK_MODEL || "deepseek-v4-flash",
       messages: messages as any,
       temperature: 0.3,
       max_tokens: 1024,
@@ -421,7 +1129,13 @@ class ProviderManager {
       messages.push({ role: "system", content: `Context:\n${context}` });
     }
 
-    for (const msg of conversationHistory.slice(-8)) {
+    // BOSQICH 14 (Conversation Snapshot): uzoq suhbatlarda eski xabarlar
+    // qisqartiriladi (1-qator, 100 belgi) — token tejaydi, kontekst saqlanadi.
+    // REVIEWER FIX: qisqa suhbatlarda (<=12 xabar) snapshot hech narsani
+    // o'zgartirmaydi — slice(-8) 8 ta TO'LIQ xabar beradi (avvalgidek).
+    // Faqat 12+ xabarlik uzoq suhbatlarda eski xabarlar qisqartiriladi.
+    const historyForLlm = buildSnapshotHistory(conversationHistory).slice(-8);
+    for (const msg of historyForLlm) {
       if (msg.role !== "system") {
         messages.push({ role: msg.role as "user" | "assistant", content: msg.content });
       }
@@ -441,560 +1155,38 @@ class ProviderManager {
     };
   }
 
-  private getTemplateResponse(intent: string, toolResults: any[], message: string, language: string): string {
-    const lower = message.toLowerCase();
-
-    if (intent === "greeting" || lower.includes("salom") || lower.includes("assalom") || lower.includes("hello") || lower.includes("hi")) {
-      if (language === "uz") {
-        return `Assalomu alaykum! 😊 Men **Mentalaba AI** — O'zbekistondagi talabalar uchun yordamchi assistant.
-
-Men sizga quyidagilarda yordam bera olaman:
-
-🏛 **Universitetlar** — davlat, xususiy va xalqaro universitetlar haqida to'liq ma'lumot
-📚 **Yo'nalishlar** — IT, tibbiyot, iqtisod, pedagogika va boshqa 50+ yo'nalish
-💰 **Grantlar** — 100% grant, davlat granti, stipendiyalar
-📰 **Yangiliklar** — so'nggi ta'lim yangiliklari va e'lonlar
-
-Qaysi yo'nalish sizni qiziqtiradi? Qayerda o'qimoqchisiz? Savolingizni yozing, men sizga eng yaxshi variantlarni topib beraman.
-
-👉 [Mentalaba.uz](https://mentalaba.uz) — barcha universitetlar katalogi`;
-      } else if (language === "ru") {
-        return `Здравствуйте! 😊 Я **Mentalaba AI** — помощник для студентов Узбекистана.
-
-Я могу помочь вам с:
-
-🏛 **Университеты** — государственные, частные и международные
-📚 **Направления** — IT, медицина, экономика, педагогика и 50+ других
-💰 **Гранты** — 100% гранты, стипендии
-📰 **Новости** — последние новости образования
-
-Какой у вас вопрос? Напишите, и я найду лучшие варианты для вас!
-
-👉 [Mentalaba.uz](https://mentalaba.uz)`;
-      } else {
-        return `Hello! 😊 I'm **Mentalaba AI** — your assistant for students in Uzbekistan.
-
-I can help you with:
-
-🏛 **Universities** — state, private, and international universities
-📚 **Programs** — IT, medicine, economics, pedagogy and 50+ more
-💰 **Grants** — 100% grants, scholarships, stipends
-📰 **News** — latest education news and announcements
-
-What would you like to know? Write your question and I'll find the best options for you!
-
-👉 [Mentalaba.uz](https://mentalaba.uz)`;
-      }
-    }
-
-    if (toolResults.length > 0) {
-      const firstResult = toolResults[0];
-      if (firstResult.success && firstResult.data) {
-        if (firstResult.tool === "search_university") {
-          // Yangi format: { universities, universityOverview, regionOverview } yoki eski format: array
-          const isOverviewFormat = !Array.isArray(firstResult.data) && firstResult.data?.universityOverview;
-          const overview = isOverviewFormat ? firstResult.data.universityOverview : null;
-          const regionOverview = isOverviewFormat ? firstResult.data.regionOverview : null;
-          const data = isOverviewFormat
-            ? (Array.isArray(firstResult.data.universities) ? firstResult.data.universities : [])
-            : (Array.isArray(firstResult.data) ? firstResult.data : [firstResult.data]);
-
-          // AGAR DATA TO'LIQ BO'SH BO'LSA (va overview/region yo'q), "0+" ko'rsatish o'rniga fallback
-          const isEmpty = data.length === 0;
-
-          // REGION OVERVIEW FORMATI — "Toshkentda nechta universitet?" yoki "xalqaro universitetlar bormi?"
-          if (regionOverview?.regionSpecific) {
-            const regionNames: Record<number, string> = {
-              1: 'Qoraqalpogiston Respublikasi', 2: 'Andijon viloyati', 3: 'Buxoro viloyati',
-              4: 'Jizzax viloyati', 5: 'Qashqadaryo viloyati', 6: 'Navoiy viloyati',
-              7: 'Namangan viloyati', 8: 'Samarqand viloyati', 9: 'Surxondaryo viloyati',
-              10: 'Sirdaryo viloyati', 11: 'Toshkent viloyati', 12: "Farg'ona viloyati",
-              13: 'Xorazm viloyati', 14: 'Toshkent shahri', 15: 'Boshqa',
-            };
-            const rn = regionNames[regionOverview.regionId] || `Viloyat`;
-            const rs = regionOverview.regionSpecific;
-
-            // User so'rovida kategoriya (xalqaro/davlat/xususiy) bormi?
-            const msgLower = message.toLowerCase();
-            const askedInternational = /\bxalqaro\b/i.test(msgLower);
-            const askedState = /\bdavlat\b/i.test(msgLower);
-            const askedPrivate = /\bxususiy\b/i.test(msgLower);
-            const askedYesNo = /\b(bormi|bormikan|mavjudmi)\b/i.test(msgLower);
-
-            // Qaysi kategoriya so'ralgan?
-            const askedCategory = askedInternational ? 'xalqaro' : askedState ? 'davlat' : askedPrivate ? 'xususiy' : null;
-            // Shu kategoriyadagi universitetlar soni
-            const categoryCount = askedInternational ? rs.international : askedState ? rs.state : askedPrivate ? rs.private : rs.total;
-            const categoryLabel = askedCategory || 'universitet';
-            const categoryIcon = askedInternational ? '🌍' : askedState ? '🏛' : askedPrivate ? '🏢' : '🏛';
-
-            // HEADER: kategoriya aniqlangan bo'lsa, shunga mos header
-            let response = '';
-            if (askedYesNo) {
-              // "bormi?" -> "Ha, ...da N ta xalqaro universitet bor!"
-              response = `Ha, ${rn}da **${categoryCount} ta** ${categoryLabel} universitet bor! 🎉\n\n`;
-            } else if (askedCategory) {
-              // "... kerak" yoki "... qiziqaman" -> "Mana ${rn}dagi ${categoryLabel} universitetlar"
-              response = `${categoryIcon} **Mana ${rn}dagi ${categoryLabel} universitetlar ro'yxati:**\n\n`;
-            } else {
-              // Umumiy savol -> eski format
-              response = `### 🏛 ${rn} universitetlari\n\n${rn}da jami **${rs.total} ta** universitet mavjud! 🎉\n\n`;
-            }
-
-            // Turlari bo'yicha taqsimot (faqat umumiy savol bo'lsa, yoki ko'rsatish foydali)
-            if (!askedCategory) {
-              response += `**Turlari bo'yicha:**\n`;
-              response += `🏛 **Davlat:** ${rs.state} ta\n`;
-              response += `🏢 **Xususiy:** ${rs.private} ta\n`;
-              if (rs.international > 0) response += `🌍 **Xalqaro:** ${rs.international} ta\n`;
-            } else if (categoryCount > 0) {
-              // Aniq kategoriya so'ralganda, sonni aytamiz
-              response += `${categoryIcon} **${categoryLabel} universitetlar:** ${categoryCount} ta\n`;
-            }
-
-            // Universitetlar ro'yxati
-            if (data.length > 0) {
-              response += `\n**Ro'yxat:**\n`;
-              data.slice(0, 10).forEach((uni: any, i: number) => {
-                const icons = `${uni.hasGrant ? '💰' : ''}${uni.hasAccommodation ? '🏠' : ''}`.trim();
-                response += `${i + 1}. **${uni.fullNameUz || uni.fullNameEn}** ${icons ? icons : ''}\n`;
-                if (uni.slug) response += `   [🔍 Mentalaba.uz da ko'rish](https://mentalaba.uz/universities/${uni.slug})\n`;
-              });
-            }
-
-            // SAVOL: kategoriya + region bo'lsa -> yo'nalishni so'raymiz
-            // (keyingi qadam: foydalanuvchi yo'nalishni aytadi -> recommendation)
-            if (askedCategory && data.length > 0) {
-              response += `\n📌 **[Mentalaba.uz](https://mentalaba.uz/universities)** — barcha universitetlar katalogi\n\n😊 Qanday yo'nalishga qiziqasiz? (IT, tibbiyot, iqtisod, pedagogika...)`;
-            } else if (data.length > 0) {
-              response += `\n📌 **[Mentalaba.uz](https://mentalaba.uz/universities)** — barcha ${rs.total} ta universitet katalogi\n\n😊 Yuqoridagi universitetlardan qaysi biri haqida batafsil ma'lumot olishni xohlaysiz?`;
-            } else {
-              response += `\n📌 **[Mentalaba.uz](https://mentalaba.uz/universities)** — barcha universitetlar katalogi\n\nYana qanday yordam kerak? 😊`;
-            }
-            return response;
-          }
-
-          // MUHIM: MA'LUMOT FORMATLARINI TO'G'RI TARTIBDA TEKSHIRISH:
-          // 1. REGION overview (agar region so'ralgan bo'lsa) — yuqorida tekshirildi
-          // 2. CATEGORY overview (xususiy/davlat/xalqaro, regionsiz)
-          // 3. NATIONAL overview (agar umumiy savol bo'lsa: "nechta universitet bor?")
-          //    -> data bo'lsa ham overview ko'rsatiladi!
-          // 4. AGAR 1 TA UNIVERSITET BO'LSA -> single university format (batafsil)
-          // 5. AGAR 2+ TA BO'LSA -> list format
-          // 6. DATA BO'SH BO'LSA -> fallback
-          //
-          // BU MUHIM: "O'zbekistonda nechta universitet bor?" desa, overview (152 ta, kategoriyalar)
-          // chiqishi kerak, 20 ta random universitet ro'yxati EMAS!
-          //
-          // CATEGORY OVERVIEW — "xususiy universitetlar", "davlat universitetlari" kabi
-          // faqat kategoriya bo'yicha so'ralganda.
-          // "menga xususiy universitetlar kerak" -> count + 3 ta misol + qaysi shahar?
-          const msgLowerCat = message.toLowerCase();
-          const catInternational = /\bxalqaro\b/i.test(msgLowerCat);
-          const catState = /\bdavlat\b/i.test(msgLowerCat);
-          const catPrivate = /\bxususiy\b/i.test(msgLowerCat) || /\bnodavlat\b/i.test(msgLowerCat);
-          const askedCategoryOnly = (catInternational || catState || catPrivate) && overview && !regionOverview;
-
-          if (askedCategoryOnly) {
-            const catType = catInternational ? 'xalqaro' : catState ? 'davlat' : 'xususiy';
-            const catIcons: Record<string, string> = { 'xalqaro': '🌍', 'davlat': '🏛', 'xususiy': '🏢' };
-            const catCounts: Record<string, number> = {
-              'xalqaro': overview.categories.international,
-              'davlat': overview.categories.state,
-              'xususiy': overview.categories.private,
-            };
-            const count = catCounts[catType];
-            const icon = catIcons[catType];
-
-            const catHeading = catType === 'xalqaro' ? 'Xalqaro' : catType === 'davlat' ? 'Davlat' : 'Xususiy';
-            let response = `## ${icon} ${catHeading} universitetlar\n\n`;
-            response += `O'zbekistonda jami **${count} ta** ${catType} universitet bor! 🎉\n\n`;
-
-            if (data.length > 0) {
-              response += `**Masalan:**\n`;
-              data.slice(0, 3).forEach((uni: any) => {
-                response += `• **${uni.fullNameUz || uni.fullNameEn}**`;
-                if (uni.location) response += ` — ${uni.location}`;
-                response += '\n';
-              });
-              response += '\n';
-            }
-
-            response += `📌 **[Mentalaba.uz](https://mentalaba.uz/universities)** — barcha ${catType} universitetlar katalogi\n\nSizga qaysi shahardan kerak yoki qanday yo'nalishga qiziqasiz? 😊`;
-            return response;
-          }
-
-          // NATIONAL OVERVIEW — agar mavjud bo'lsa va ANIQ universitet so'ralmagan bo'lsa
-          // "nechta universitet bor?", "jami nechta?", "O'zbekistondagi universitetlar" kabi
-          // umumiy savollarga overview formatida javob beramiz.
-          const isGeneralQuery = !isEmpty && overview && !regionOverview;
-          if (isGeneralQuery) {
-            let response = `### 🏛 O'zbekistondagi universitetlar\n\n`;
-            response += `Jami **${overview.totalCount} ta** universitet mavjud! 🎉\n\n`;
-            response += `**Turlari bo'yicha:**\n`;
-            response += `🏛 **Davlat universitetlari:** ${overview.categories.state} ta\n`;
-            response += `🏢 **Xususiy universitetlar:** ${overview.categories.private} ta\n`;
-            response += `🌍 **Xalqaro universitetlar:** ${overview.categories.international} ta\n`;
-            if (overview.universityExamples?.length) {
-              response += `\n**Masalan:**\n`;
-              overview.universityExamples.slice(0, 6).forEach((ex: any) => {
-                const icon = ex.type === 'davlat' ? '🏛' : ex.type === 'xususiy' ? '🏢' : '🌍';
-                response += `${icon} [${ex.name}](https://mentalaba.uz/universities/${ex.slug}) — ${ex.type}\n`;
-              });
-            }
-            response += `\n📌 **[Mentalaba.uz](https://mentalaba.uz/universities)** — barcha ${overview.totalCount} universitet katalogi\n\nYana qanday yordam kerak? Masalan, ma'lum bir shahar yoki yo'nalish bo'yicha universitetlarni ko'rishni xohlaysizmi? 😊`;
-            return response;
-          }
-
-          // Agar aniq ma'lumot BO'LSA -> single university yoki list format
-          if (!isEmpty) {
-            if (data.length === 1) {
-              const uni = data[0];
-              const slug = uni.slug || '';
-              let response = `## 🏛 ${uni.fullNameUz || uni.fullNameEn}\n\n`;
-              response += `${uni.descriptionUz ? uni.descriptionUz.substring(0, 300) : ''}\n\n`;
-              response += `**📋 Asosiy ma'lumotlar:**\n`;
-              if (uni.institutionCategory) response += `• **Turi:** ${uni.institutionCategory}\n`;
-              if (uni.location) response += `• **Manzil:** ${uni.location}\n`;
-              if (uni.foundedYear) response += `• **Tashkil etilgan:** ${uni.foundedYear}\n`;
-              if (uni.studentsCount) response += `• **Talabalar soni:** ~${Math.round(uni.studentsCount / 1000)}k\n`;
-              if (uni.directionCount) response += `• **📚 Yo'nalishlar soni:** ${uni.directionCount} ta\n`;
-              if (uni.hasGrant !== undefined) response += `${uni.hasGrant ? '✅' : '❌'} **Grant:** ${uni.hasGrant ? 'Mavjud' : 'Yo\'q'}\n`;
-              if (uni.tuition && uni.tuition !== 'N/A') response += `💰 **To'lov:** ${uni.tuition}\n`;
-              if (uni.hasAccommodation !== undefined) response += `${uni.hasAccommodation ? '✅' : '❌'} **Yotoqxona:** ${uni.hasAccommodation ? 'Bor' : 'Yo\'q'}\n`;
-              if (uni.phone) response += `📞 **Telefon:** ${uni.phone}\n`;
-              if (uni.website) response += `🌐 **Sayt:** ${uni.website}\n`;
-              if (uni.educationTypes?.length > 0) response += `🎓 **Ta'lim shakllari:** ${uni.educationTypes.map((e: any) => e.name).join(', ')}\n`;
-              if (uni.degrees?.length > 0) response += `📜 **Darajalar:** ${uni.degrees.map((d: any) => d.name).join(', ')}\n`;
-              if (uni.educationLanguages?.length > 0) response += `🌐 **Ta'lim tillari:** ${uni.educationLanguages.map((l: any) => l.name).join(', ')}\n`;
-              if (uni.admissionPhone && uni.admissionPhone !== uni.phone) response += `📞 **Qabul telefon:** ${uni.admissionPhone}\n`;
-              if (uni.isOpenForAdmission !== undefined) response += `${uni.isOpenForAdmission ? '✅' : '❌'} **Qabul:** ${uni.isOpenForAdmission ? 'Ochiq' : 'Yopiq'}\n`;
-              response += `\n📌 **[Mentalaba.uz da batafsil ko'rish](https://mentalaba.uz/universities/${slug})** — barcha yo'nalishlar, grantlar va qabul shartlari\n\n😊 Yana biror universitet haqida ma'lumot kerakmi yoki qo'shimcha savolingiz bormi?`;
-              return response;
-            }
-
-            // LIST FORMATI — data.length >= 2
-            let response = "### 🏛 Universitetlar ro'yxati\n\n";
-            response += "Mana sizga mos keladigan universitetlar:\n\n";
-            data.slice(0, 10).forEach((uni: any, i: number) => {
-              const icons = `${uni.hasGrant ? '💰' : ''}${uni.hasAccommodation ? '🏠' : ''}`.trim();
-              response += `${i + 1}. **${uni.fullNameUz || uni.fullNameEn}** ${uni.location ? `— ${uni.location}` : ''} ${icons ? icons : ''}\n`;
-              if (uni.slug) {
-                response += `   [🔍 Mentalaba.uz da ko'rish](https://mentalaba.uz/universities/${uni.slug})\n`;
-              }
-            });
-            response += `\n📌 **[Mentalaba.uz](https://mentalaba.uz/universities)** — barcha ${data.length} ta universitetlar katalogi\n\nQaysi biriga batafsil qarashni xohlaysiz? 😊`;
-            return response;
-          }
-
-          // DATA BO'SH BO'LSA -> overview yoki fallback
-          if (overview) {
-            let response = "### 🏛 O'zbekistondagi universitetlar\n\n";
-            response += `Jami **${overview.totalCount} ta** universitet mavjud! 🎉\n\n`;
-            response += `**Turlari bo'yicha:**\n`;
-            response += `🏛 **Davlat universitetlari:** ${overview.categories.state} ta\n`;
-            response += `🏢 **Xususiy universitetlar:** ${overview.categories.private} ta\n`;
-            response += `🌍 **Xalqaro universitetlar:** ${overview.categories.international} ta\n`;
-            if (overview.universityExamples?.length) {
-              response += `\n**Masalan:**\n`;
-              overview.universityExamples.slice(0, 6).forEach((ex: any) => {
-                const icon = ex.type === 'davlat' ? '🏛' : ex.type === 'xususiy' ? '🏢' : '🌍';
-                response += `${icon} [${ex.name}](https://mentalaba.uz/universities/${ex.slug}) — ${ex.type}\n`;
-              });
-            }
-            response += `\n📌 **[Mentalaba.uz](https://mentalaba.uz/universities)** — barcha ${overview.totalCount} universitet katalogi\n\nYana qanday yordam kerak? Masalan, ma'lum bir shahar yoki yo'nalish bo'yicha universitetlarni ko'rishni xohlaysizmi? 😊`;
-            return response;
-          }
-
-          // Hech narsa topilmadi -> fallback
-          return `Kechirasiz, sizning so'rovingiz bo'yicha universitet topilmadi. 😔\n\nIltimos, boshqa shartlar yoki hudud bo'yicha qidirib ko'ring.\n\n📌 **[Mentalaba.uz](https://mentalaba.uz/universities)** — barcha universitetlar katalogi\n\nYana qanday yordam kerak? 😊`;
-        }
-
-        if (firstResult.tool === "search_direction") {
-          const directionsData = Array.isArray(firstResult.data)
-            ? { directions: firstResult.data, universities: [], tuitionInfo: undefined, universityDirections: undefined }
-            : firstResult.data;
-          const data = Array.isArray(directionsData.directions) ? directionsData.directions : [];
-          const uniList = Array.isArray(directionsData.universities) ? directionsData.universities : [];
-          const uniDir = directionsData.universityDirections;
-          const tuitionInfo = directionsData.tuitionInfo;
-
-          // FORMAT 1 — aniq bitta universitet nomi bo'yicha so'ralganda
-          // ("Samarqand davlat universitetida qanday yo'nalishlar bor?")
-          // — barcha yo'nalish nomlarini to'liq ro'yxat qilib ko'rsatamiz
-          if (uniDir && uniDir.directionNames?.length > 0) {
-            let response = `### 📚 ${uniDir.universityName} yo'nalishlari\n\n`;
-            response += `Jami **${uniDir.totalCount} ta** yo'nalish mavjud! 🎉\n\n`;
-            response += `**To'liq ro'yxat:**\n`;
-            uniDir.directionNames.slice(0, 30).forEach((name: string, i: number) => {
-              response += `${i + 1}. ${name}\n`;
-            });
-            if (uniDir.directionNames.length > 30) {
-              response += `\n... va yana ${uniDir.directionNames.length - 30} ta yo'nalish\n`;
-            }
-            if (uniDir.universitySlug) {
-              response += `\n📌 **[Mentalaba.uz da batafsil](https://mentalaba.uz/universities/${uniDir.universitySlug})** — qabul shartlari, grantlar va kontrakt narxlari\n`;
-            }
-            response += `\n📌 **[Mentalaba.uz](https://mentalaba.uz/directions)** — barcha yo'nalishlar katalogi\n\nYana qanday yordam kerak? 😊`;
-            return response;
-          }
-
-          if (data.length === 0) {
-            return "Kechirasiz, sizning so'rovingiz bo'yicha yo'nalish topilmadi. 😔 Boshqa soha yoki shaharni ko'raylikmi?";
-          }
-
-          // FORMAT 2 — soha bo'yicha qidiruv ("IT ga qiziqaman, qaysi universitet mos?")
-          // MUHIM: bu yerda mos universitetlarning TO'LIQ ma'lumoti (tavsif, narx, kontakt, sayt)
-          // bor bo'lsa, faqat nom emas — ularni to'liq ko'rsatamiz.
-          if (uniList.length > 0) {
-            let response = "### 🎓 Sizga mos universitetlar\n\n";
-            response += `"${message}" so'roviga mos **${uniList.length} ta** universitet topildi! 🎉\n\n`;
-
-            uniList.slice(0, 5).forEach((uni: any, i: number) => {
-              response += `---\n\n`;
-              response += `**${i + 1}. ${uni.fullNameUz || uni.fullNameEn}**\n\n`;
-              if (uni.descriptionUz) {
-                const shortDesc = uni.descriptionUz.substring(0, 250) + (uni.descriptionUz.length > 250 ? '...' : '');
-                response += `${shortDesc}\n\n`;
-              }
-              if (uni.institutionCategory) response += `📋 **Turi:** ${uni.institutionCategory}\n`;
-              if (uni.location) response += `📍 **Manzil:** ${uni.location}\n`;
-              response += `${uni.hasGrant ? '✅' : '❌'} **Grant:** ${uni.hasGrant ? 'Mavjud' : 'Yo\'q'}\n`;
-              response += `${uni.hasAccommodation ? '✅' : '❌'} **Yotoqxona:** ${uni.hasAccommodation ? 'Bor' : 'Yo\'q'}\n`;
-              if (uni.tuition && uni.tuition !== 'N/A') response += `💰 **To'lov:** ${uni.tuition}\n`;
-              if (uni.phone) response += `📞 **Telefon:** ${uni.phone}\n`;
-              if (uni.website) response += `🌐 **Sayt:** ${uni.website}\n`;
-              response += `${uni.isOpenForAdmission ? '✅' : '❌'} **Qabul:** ${uni.isOpenForAdmission ? 'Ochiq' : 'Yopiq'}\n`;
-              if (uni.slug) response += `[🔍 Mentalaba.uz da batafsil ko'rish](https://mentalaba.uz/universities/${uni.slug})\n`;
-              response += `\n`;
-            });
-
-            // Shu universitetlardagi mos yo'nalishlar nomlarini ham qo'shamiz
-            const dirsForShownUnis = data.filter((d: any) =>
-              uniList.slice(0, 5).some((u: any) => u.id === d.universityId)
-            );
-            if (dirsForShownUnis.length > 0) {
-              response += `---\n\n**📚 Mos yo'nalishlar:**\n`;
-              dirsForShownUnis.slice(0, 10).forEach((dir: any) => {
-                response += `• ${dir.nameUz || dir.nameEn} — *${dir.universityName}*\n`;
-              });
-              response += `\n`;
-            }
-
-            if (tuitionInfo?.hasData) {
-              response += `💰 **Umumiy narx oralig'i:** ${(tuitionInfo.minTuition / 1000000).toFixed(0)} - ${(tuitionInfo.maxTuition / 1000000).toFixed(0)} mln so'm\n\n`;
-            }
-
-            response += `📌 **[Mentalaba.uz](https://mentalaba.uz/directions)** — barcha yo'nalishlar katalogi\n\nQaysi biriga batafsil qarashni xohlaysiz? 😊`;
-            return response;
-          }
-
-          // FORMAT 3 — fallback: faqat yo'nalish nomlari bor, universitet to'liq ma'lumoti yo'q
-          let response = "### 📚 Yo'nalishlar\n\n";
-          response += "Mana bir nechta variantlar:\n\n";
-          data.slice(0, 8).forEach((dir: any, i: number) => {
-            response += `${i + 1}. **${dir.nameUz || dir.nameEn}** ${dir.universityName ? `— ${dir.universityName}` : ''}\n`;
-          });
-
-          if (tuitionInfo?.hasData && tuitionInfo.universities.length > 0) {
-            response += `\n💰 **Kontrakt narxlari:** ${(tuitionInfo.minTuition / 1000000).toFixed(0)} - ${(tuitionInfo.maxTuition / 1000000).toFixed(0)} mln so'm (universitetga qarab)\n`;
-            response += `   Masalan: `;
-            response += tuitionInfo.universities.map((u: any) =>
-              `[${u.name}](${u.slug ? `https://mentalaba.uz/universities/${u.slug}` : 'https://mentalaba.uz/universities'}) - ${u.tuition}`
-            ).join(', ');
-            response += `\n`;
-          }
-
-          response += `\n📌 **[Mentalaba.uz](https://mentalaba.uz/directions)** — barcha yo'nalishlar katalogi\n\nYana qanday yo'nalishlar qiziqtiradi? Yoki ma'lum bir universitet bo'yicha ko'rishni xohlaysizmi? 😊`;
-          return response;
-        }
-
-        if (firstResult.tool === "search_grants") {
-          const data = Array.isArray(firstResult.data) ? firstResult.data : [firstResult.data];
-          if (data.length === 0) return "Kechirasiz, hozircha faol grantlar topilmadi. 😔 Yangi grantlar e'lon qilinganda xabar beramiz!\n\n📌 **[Mentalaba.uz](https://mentalaba.uz/grants)** — grantlar bo'limi\n\nYana qanday yordam kerak?";
-          let response = "### 💰 Grantlar\n\n";
-          response += "Ajoyib! Sizga mos grantlar topildi 🎉\n\n";
-          data.slice(0, 5).forEach((grant: any, i: number) => {
-            response += `${i + 1}. **${grant.grantTitleUz || grant.grantTitleEn}**\n`;
-            if (grant.universityNameUz) response += `   • **Universitet:** ${grant.universityNameUz}\n`;
-            if (grant.grantDescUz) response += `   • ${grant.grantDescUz.substring(0, 200)}...\n`;
-          });
-          response += `\n📌 **[Mentalaba.uz](https://mentalaba.uz/grants)** — barcha grantlar\n\nYana biror narsa bo'yicha yordam kerakmi? 😊`;
-          return response;
-        }
-
-        if (firstResult.tool === "compare_universities") {
-          const data = Array.isArray(firstResult.data) ? firstResult.data : [firstResult.data];
-          if (data.length === 0) return "Kechirasiz, taqqoslash uchun ma'lumot topilmadi. 😔";
-          let response = "### ⚖️ Universitetlarni taqqoslash\n\n";
-          response += "Mana siz uchun solishtirma jadval:\n\n";
-          data.slice(0, 5).forEach((uni: any, i: number) => {
-            response += `**${i + 1}. ${uni.name}**\n`;
-            response += `📌 [Mentalaba.uz da ko'rish](https://mentalaba.uz/universities/${uni.slug || ''})\n`;
-            response += `| **Turi** | ${uni.type || 'N/A'} |\n`;
-            response += `| **Manzil** | ${uni.location || 'N/A'} |\n`;
-            response += `| **💰 Grant** | ${uni.hasGrant ? '✅ Mavjud' : '❌ Yo\'q'} |\n`;
-            response += `| **🏠 Yotoqxona** | ${uni.hasAccommodation ? '✅ Bor' : '❌ Yo\'q'} |\n`;
-            response += `| **💵 To'lov** | ${uni.tuition || 'N/A'} |\n`;
-            response += `| **📚 Yo'nalishlar** | ${uni.directionCount || 'N/A'} ta |\n`;
-            response += `| **🎓 Talabalar** | ${uni.studentsCount ? `~${Math.round(uni.studentsCount / 1000)}k` : 'N/A'} |\n`;
-            response += `| **🚪 Qabul** | ${uni.isOpenForAdmission ? '✅ Ochiq' : '❌ Yopiq'} |\n`;
-            response += `\n`;
-          });
-          response += `📌 **[Mentalaba.uz](https://mentalaba.uz/universities)** — barcha universitetlar katalogi\n\nQaysi biriga batafsil qarashni xohlaysiz? 😊`;
-          return response;
-        }
-
-        if (firstResult.tool === "recommend") {
-          const data = firstResult.data;
-
-          // Agar clarification kerak bo'lsa — foydalanuvchiga savol beramiz
-          if (data?.needsClarification) {
-            let response = "### 🎯 Sizga eng yaxshi variantni topaman!\n\n";
-            response += "Keling, bir necha savolga javob bering:\n\n";
-
-            const missing = data.preferences?.missing || [];
-
-            if (missing.includes('region')) {
-              response += "1️⃣ **Qaysi shahar yoki viloyatda o'qimoqchisiz?** (Toshkent, Samarqand, Buxoro...)\n";
-            }
-            if (missing.includes('directionCategory')) {
-              response += "2️⃣ **Qanday yo'nalish sizni qiziqtiradi?** (IT, tibbiyot, iqtisod, pedagogika, huquq...)\n";
-              if (!missing.includes('region')) {
-                response += "Masalan: IT, tibbiyot, iqtisod, muhandislik, pedagogika, huquq...\n";
-              }
-            }
-            if (missing.includes('institutionCategory')) {
-              response += "3️⃣ **Davlatmi yoki xususiy universitetmi?**\n";
-            }
-
-            response += "\n📌 **[Mentalaba.uz](https://mentalaba.uz/universities)** — barcha universitetlar\n\nJavob bering, men sizga eng yaxshi variantlarni tavsiya qilaman! 😊";
-            return response;
-          }
-
-          // Natijalar mavjud — rekomendatsiyalarni ko'rsatamiz
-          if (data?.recommendations?.length > 0) {
-            let response = "### 🎯 Siz uchun eng yaxshi tavsiyalar!\n\n";
-            response += `Sizning xohishingiz bo'yicha **${data.recommendations.length} ta** universitet topildi! 🎉\n\n`;
-
-            const prefs = data.preferences || {};
-            if (prefs.directionCategory) {
-              response += `📚 **Yo'nalish:** ${prefs.directionCategory.toUpperCase()}\n`;
-            }
-            if (prefs.institutionCategory) {
-              const typeNames: Record<string, string> = { '3': '🏛 Davlat', '4': '🏢 Xususiy', '5': '🌍 Xalqaro' };
-              response += `${typeNames[prefs.institutionCategory] || ''} universitetlar\n`;
-            }
-            response += `\n`;
-
-            data.recommendations.forEach((uni: any, i: number) => {
-              const icons = `${uni.hasGrant ? '💰' : ''}${uni.hasAccommodation ? '🏠' : ''}`.trim();
-              response += `**${i + 1}. ${uni.fullNameUz || uni.fullNameEn}** ${icons ? icons : ''}\n`;
-              if (uni.location) response += `   📍 *${uni.location}*\n`;
-              if (uni.tuition && uni.tuition !== 'N/A') response += `   💵 *${uni.tuition}*\n`;
-              if (uni.slug) response += `   [🔍 Mentalaba.uz da ko'rish](https://mentalaba.uz/universities/${uni.slug})\n`;
-              if (uni.descriptionUz) {
-                const shortDesc = uni.descriptionUz.substring(0, 150) + (uni.descriptionUz.length > 150 ? '...' : '');
-                response += `   ${shortDesc}\n`;
-              }
-              response += `\n`;
-            });
-
-            if (data.directions?.length > 0) {
-              response += `**📚 Topilgan yo'nalishlar:** ${data.directions.length} ta\n`;
-              data.directions.slice(0, 8).forEach((d: any, i: number) => {
-                response += `${i + 1}. ${d.nameUz || d.nameEn} — ${d.universityName}\n`;
-              });
-              response += `\n`;
-            }
-
-            if (data.grants?.length > 0) {
-              response += `**💰 Grantlar:** ${data.grants.length} ta topildi!\n`;
-              data.grants.slice(0, 3).forEach((g: any) => {
-                response += `- ${g.grantTitleUz || g.grantTitleEn}\n`;
-              });
-              response += `\n`;
-            }
-
-            response += `📌 **[Mentalaba.uz](https://mentalaba.uz/universities)** — barcha universitetlar katalogi\n\nQaysi biriga batafsil qarashni xohlaysiz? 😊`;
-            return response;
-          }
-
-          return "Kechirasiz, sizning talabingizga mos universitet topilmadi. 😔 Iltimos, boshqa parametrlarni tanlab ko'ring.";
-        }
-
-        if (firstResult.tool === "search_news") {
-          const data = Array.isArray(firstResult.data) ? firstResult.data : [firstResult.data];
-          if (data.length === 0) return "Kechirasiz, hozircha yangiliklar topilmadi. 😔";
-          let response = "### 📰 So'nggi yangiliklar\n\n";
-          data.slice(0, 5).forEach((news: any, i: number) => {
-            response += `${i + 1}. **${news.titleUz || news.titleEn}**\n`;
-            if (news.descriptionUz) response += `   ${news.descriptionUz.substring(0, 150)}...\n`;
-          });
-          response += `\n📌 **[Mentalaba.uz](https://mentalaba.uz/news)** — barcha yangiliklar\n\nYana qanday ma'lumot kerak? 😊`;
-          return response;
-        }
-      }
-    }
-
-    // Agar DATA INTENT bo'lsa (tool empty/failed bo'lsa ham), data-spesifik xabar qaytaramiz
-    // BU MUHIM: direction_search empty bo'lganda greeting yoki generic fallback chiqmasligi kerak!
-    if (intent === "direction_search") {
-      return `Kechirasiz, sizning so'rovingiz bo'yicha yo'nalish topilmadi. 😔\n\nIltimos, boshqa soha yoki shaharni ko'raylikmi? Masalan:\n• 📚 "IT yo'nalishlari"\n• 💰 "Grantlar bormi"\n• 🏛 "Toshkentdagi universitetlar"\n\nYoki menga o'z xohishingizni ayting!`;
-    }
-    if (intent === "grant_search") {
-      return "Kechirasiz, hozircha faol grantlar topilmadi. 😔 Yangi grantlar e'lon qilinganda xabar beramiz!\n\n📌 **[Mentalaba.uz](https://mentalaba.uz/grants)** — grantlar bo'limi";
-    }
-    if (intent === "news_search") {
-      return "Kechirasiz, hozircha yangiliklar topilmadi. 😔\n\n📌 **[Mentalaba.uz](https://mentalaba.uz/news)** — yangiliklar bo'limi";
-    }
-
-    // Agar hech qanday ma'lumot topilmasa, rekomendatsiya so'raymiz
-    if (lower.includes("qaysi") || lower.includes("tanlasam") || lower.includes("bilmayman") || lower.includes("yaxshisi") || lower.includes("maslahat")) {
-      if (language === "uz") {
-        return `Tushunaman! 😊 Sizga mos variantni topishga yordam beraman. Keling, bir necha savolga javob bering:
-
-1️⃣ **Qaysi shahar yoki viloyatda o'qimoqchisiz?** (Toshkent, Samarqand, Buxoro...)
-2️⃣ **Qanday yo'nalishlarga qiziqasiz?** (IT, tibbiyot, iqtisod, pedagogika, huquq...)
-3️⃣ **Davlatmi yoki xususiy universitetmi?**
-4️⃣ **Grant qiziqtiradimi?**
-
-Shu ma'lumotlar asosida sizga eng yaxshi variantlarni tavsiya qilaman! 🎯`;
-      } else if (language === "ru") {
-        return `Понимаю! 😊 Давайте помогу найти лучший вариант. Ответьте на несколько вопросов:
-
-1️⃣ **В каком городе или регионе хотите учиться?** (Ташкент, Самарканд, Бухара...)
-2️⃣ **Какие направления вас интересуют?** (IT, медицина, экономика, педагогика, право...)
-3️⃣ **Государственный или частный университет?**
-4️⃣ **Грант интересует?**
-
-На основе этих данных я порекомендую лучшие варианты! 🎯`;
-      } else {
-        return `I understand! 😊 Let me help you find the best option. Answer a few questions:
-
-1️⃣ **Which city or region would you like to study in?** (Tashkent, Samarkand, Bukhara...)
-2️⃣ **What field interests you?** (IT, medicine, economics, pedagogy, law...)
-3️⃣ **State or private university?**
-4️⃣ **Are you interested in grants?**
-
-Based on this, I'll recommend the best options for you! 🎯`;
-      }
-    }
-
-    return this.getFallbackResponse(message, language);
+  /**
+   * TEMPLATE RESPONSE (FORMATTER LAYER - BOSQICH 7)
+   *
+   * Template javoblarni responseBuilder (formatter/ modullari) orqali qurish.
+   * Eski 700+ satrli shablon logikasi formatter/ modullariga ko'chirildi:
+   * university.ts, direction.ts, tuition.ts, grant.ts, news.ts,
+   * comparison.ts, recommendation.ts, common.ts
+   *
+   * CONFIDENCE SCORE: entityConfidence past bo'lsa aniqlashtiruvchi savol
+   * javob oxiriga qo'shiladi.
+   */
+  private getTemplateResponse(
+    intent: string,
+    toolResults: any[],
+    message: string,
+    language: string,
+    entities?: Record<string, any>,
+    entityConfidence?: Record<string, number>
+  ): string {
+    return responseBuilder.build({
+      intent,
+      toolResults,
+      message,
+      language,
+      entities,
+      entityConfidence,
+    });
   }
 
-  private getFallbackResponse(message: string, language: string): string {
-    if (language === "uz") {
-      return 'Kechirasiz, hozircha bu ma\'lumotni topa olmadim.\n\nEhtimol, savolingizni boshqacha yozib ko\'ring. Masalan:\n\n- "Toshkentdagi davlat universitetlari"\n- "IT yo\'nalishlari"\n- "Grantlar bormi"\n- "So\'nggi yangiliklar"\n\nYoki menga nima izlayotganingizni yozing, men sizga yordam beraman.\n\n📌 [Mentalaba.uz](https://mentalaba.uz) — barcha imkoniyatlar';
-    }
-
-    if (language === "ru") {
-      return 'Извините, не удалось найти эту информацию.\n\nПопробуйте переформулировать вопрос, например:\n\n- "Государственные университеты Ташкента"\n- "IT направления"\n- "Есть ли гранты"\n- "Последние новости"\n\nРасскажите, что вы ищете, и я помогу найти лучший вариант.\n\n📌 [Mentalaba.uz](https://mentalaba.uz) — все возможности';
-    }
-
-    return 'Sorry, I couldn\'t find this information.\n\nTry rephrasing your question, for example:\n\n- "State universities in Tashkent"\n- "IT programs"\n- "Are there grants"\n- "Latest news"\n\nOr tell me what you\'re looking for and I\'ll help find the best option.\n\n📌 [Mentalaba.uz](https://mentalaba.uz) — all opportunities';
-  }
 }
 
+
+
+// ✅ Eksport qilish
 export const providerManager = new ProviderManager();

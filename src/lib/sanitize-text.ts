@@ -40,17 +40,14 @@ export function sanitizeText(input: string): string {
     }
   }
 
-  text = Array.from(text)
-    .filter((ch) => {
-      const cp = ch.codePointAt(0) || 0;
-      return !(
-        (cp >= 0x1f300 && cp <= 0x1f6ff) ||
-        (cp >= 0x1f900 && cp <= 0x1f9ff) ||
-        (cp >= 0x2600 && cp <= 0x26ff) ||
-        (cp >= 0x2700 && cp <= 0x27bf)
-      );
-    })
-    .join('');
-
-  return text.replace(/\s{2,}/g, ' ').trim();
+  // MUHIM: emojilarni o'chirmaymiz va yangi qatorlarni buzmaymiz.
+  // Avvalgi versiya emojilarni (🏛🌍📚✅...) filter qilib o'chirardi va
+  // /\s{2,}/ bilan \n\n larni bitta bo'sh joyga aylantirardi. Bu esa
+  // frontend RichContent parserini (kartochka aniqlash, markdown
+  // sarlavhalar, ro'yxatlar) butunlay buzardi — logda data bor, lekin
+  // chatda universitet nomi / yo'nalish ko'rinmasdi.
+  // Endi faqat qatordan ortiqcha bo'sh joylarni yig'ishtiramiz.
+  return text
+    .replace(/[ \t]+/g, ' ')
+    .trim();
 }

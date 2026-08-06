@@ -223,6 +223,22 @@ model ChatMessage {
   createdAt      DateTime @default(now()) @map("created_at")
 
   session ChatSession @relation(fields: [sessionId], references: [id])
+  feedback ChatFeedback[]
 
   @@map("chat_messages")
+}
+
+model ChatFeedback {
+  id          String   @id @default(cuid())
+  messageId   String   @map("message_id")
+  sessionId   String   @map("session_id")
+  rating      Int
+  comment     String?
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  message ChatMessage @relation(fields: [messageId], references: [id])
+
+  @@index([messageId])
+  @@index([sessionId])
+  @@map("chat_feedback")
 }

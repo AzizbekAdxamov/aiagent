@@ -22,8 +22,23 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
+# server loglar (gitga kerak emas)
+server.log
+dev-server.log
+*.log
+
+# backup / chiquvchi fayllar (gitga kerak emas)
+*.bak
+*.bak2
+*.corrupt.txt
+$path.bak_region
+UsersatxamOneDriveDesktopmentalba_agentswagger.json
+
 # local env files
+.env
 .env*.local
+# lekin namuna fayl gitga tushishi mumkin (secret yo'q)
+!.env.example
 
 # vercel
 .vercel

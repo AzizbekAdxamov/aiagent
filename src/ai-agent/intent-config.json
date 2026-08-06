@@ -1,0 +1,337 @@
+{
+  "_meta": {
+    "description": "Mentalaba AI intent configi — intent'larni kodga tegmasdan boshqarish (BOSQICH 4).",
+    "howToAdd": "Yangi intent qo'shish: 1) object'ga yangi kalit qo'shing (tartib MUHIM — oldingi intent'lar avval tekshiriladi). 2) 'patterns' — regex stringlar (\\s, \\b, \\w — JSON'da ikkilangan backslash bilan!). 3) 'keywords' — oddiy so'zlar, avtomatik \\bso'z\\b regex'iga aylanadi. 4) 'handler' — tool-router'dagi dispatch kaliti (search_university, search_direction, list_directions, search_grants, search_news, search_tuition, compare_universities, recommend, get_admission, get_transfer, none). 5) 'tool' — javob formatlashda ishlatiladigan tool nomi. 6) dataIntent=true — data bo'lmasa template fallback (AI hallucination oldini oladi). 7) responseStrategy — javob qanday yaratiladi: \"template\" (0 token), \"llm\" (reasoning), \"hybrid\" (API data + LLM tahlil). Default: dataIntent=true → template, aks holda llm. Eski aiIntent=true → llm ga teng. 8) selfComplete=true — follow-up konteksti qo'shilmaydi (katalog/self-contained so'rovlar).",
+    "orderNote": "Kalit tartibi klassifikatsiya tartibi — aniqroq intent'lar (comparison, tuition_search, list'lar) umumiyroqlardan OLDIN keladi!"
+  },
+  "greeting": {
+    "label": "Salomlashish",
+    "tool": "none",
+    "handler": "none",
+    "priority": 0.75,
+    "dataIntent": false,
+    "responseStrategy": "template",
+    "selfComplete": true,
+    "patterns": [
+      "^(salom|assalomu\\s*alaykum|hayrli\\s*kun|hello|hi|hey|good\\s+morning|good\\s+evening|vaalom)\\s*[!.,?]*\\s*$"
+    ],
+    "keywords": []
+  },
+  "explanation": {
+    "label": "Tavsiya sababini tushuntirish — 'Nega aynan TATU?' (BOSQICH 14, JSON-only)",
+    "tool": "explain_recommendation",
+    "handler": "explain_recommendation",
+    "priority": 0.92,
+    "dataIntent": true,
+    "responseStrategy": "template",
+    "selfComplete": false,
+    "patterns": [
+      "^(nega|nima\\s+uchun|why)\\s*[!.,?]*\\s*$",
+      "(nega|nima\\s+uchun)\\s*(?:aynan|mana\\s+shu)",
+      "(nega|nima\\s+uchun)\\s+shu(?=\\s+(?:universitet|oliygoh|institut|variant|tavsiya|narsa|joy)\\b|[!.,?]|$)",
+      "(sababini?\\s*(?:ayt|tushuntir|ber|bilmoqchiman)?|sababi\\s+nima|sababdan|nima\\s+sababdan|tavsiya\\s+sababi)"
+    ],
+    "keywords": ["nega", "nima uchun", "sabab", "why"]
+  },
+  "thanks": {
+    "label": "Minnatdorchilik / yakun",
+    "tool": "none",
+    "handler": "none",
+    "priority": 0.85,
+    "dataIntent": false,
+    "responseStrategy": "template",
+    "selfComplete": true,
+    "patterns": [
+      "^(rahmat|katta rahmat|tashakkur|tashakkur\\s+rahmat|rahmat\\s+sizga|sizga\\s+rahmat|thanks|thank\\s+you|thx|ok\\s+rahmat|yordamingiz\\s+uchun)\\b"
+    ],
+    "keywords": []
+  },
+  "comparison": {
+    "label": "Universitetlarni taqqoslash",
+    "tool": "compare_universities",
+    "handler": "compare_universities",
+    "priority": 0.85,
+    "dataIntent": true,
+    "responseStrategy": "hybrid",
+    "selfComplete": false,
+    "patterns": [
+      "(solishtir|taqqosla|compare|comparison|farqi)",
+      "^(?!.*(?:yo'nalish|yonalish)).*qaysi\\s+(?:\\w+\\s+)?(yaxshiroq|yaxshi|afzal|arzon|sifatli)",
+      "\\bvs\\b|versus|\\bva\\s+\\b.*\\b(ning\\s+farqi|solishtir)",
+      "\\b(TATU|TUIT|INHA|WIUT|PDP|MDIS|Amity|Westminster|amity|westminster|TTA|SamDU|BuxDU)\\s*(yoki|or)\\s*\\w+",
+      "(davlat|xususiy|xalqaro)(mi)\\s*(yoki|or)\\s*(davlat|xususiy|xalqaro)(mi)?"
+    ],
+    "keywords": []
+  },
+  "tuition_search": {
+    "label": "Kontrakt narxi bo'yicha qidiruv",
+    "tool": "search_tuition",
+    "handler": "search_tuition",
+    "priority": 0.85,
+    "dataIntent": true,
+    "selfComplete": true,
+    "patterns": [
+      "(eng\\s+arzon|arzonroq|narxi\\s+arzon|arzon)\\s+(universitet|oliygoh|ta'lim|o'qish)",
+      "(narx|narxi|narxlari|narh|narhlari|kontrakt(?:lar|lari)?|to'lov(?:lar|lari)?|tuition|price)\\s+(qancha|necha|qanday|bormi|bor|ro'yxati|eng\\s+arzon)",
+      "universitet(?:larining|larning|lar|larini)?\\s+(narx|narxi|narxlari|narh|narhlari|kontrakt(?:lar|lari)?|to'lov(?:lar|lari)?)\\s*(bo'yicha|bormi|bor|qancha|qanday)?",
+      "(^|\\s)(kontrakt|narx|narh|to'lov|tuition|price)(?:lar|lari|larini|larining|ining|ning|ni|i|ini)?(\\s|$|,)",
+      "(pulim|mablag'im|mablagim|byudjetim|pulimiz|pul)(?:lar|im)?\\s*(kam|oz|yo'q|yetarli\\s+emas|yetmaydi)"
+    ],
+    "keywords": []
+  },
+  "university_list": {
+    "label": "Universitetlar katalogi",
+    "tool": "search_university",
+    "handler": "search_university",
+    "priority": 0.85,
+    "dataIntent": true,
+    "selfComplete": true,
+    "patterns": [
+      "(qanday|qanaqa|qaysi)\\s+universitet(lar)?\\s+(bor|bormi|mavjud|mavjudmi|ro'yxati|katalogi)",
+      "universitet(lar)?\\s+(ro'yxati|katalogi|mavjudlari)",
+      "^(universitetlar|universitetlari)\\s*(bormi|mavjudmi|mavjud)?"
+    ],
+    "keywords": []
+  },
+  "university_detail": {
+    "label": "Universitet haqida batafsil ma'lumot (BOSQICH 4 — JSON-only yangi intent)",
+    "tool": "search_university",
+    "handler": "search_university",
+    "priority": 0.82,
+    "dataIntent": true,
+    "selfComplete": false,
+    "patterns": [
+      "(batafsil|to'liq)\\s+(ma'lumot|info|ko'rish|qarab|qarang|o'rgan)",
+      "(universiteti?|instituti?|oliygohi?)(da|ning|ga|ni|dan|dagi)?\\s+(manzili?|kontakt(lar)?i?|telefon|raqami?|qayerda\\s+joylashgan)",
+      "(manzili?|kontakt(lar)?i?|telefon|raqami?|linki?|sayti?|websayti?)\\s+(nima|qanday|qanaqa|bormi|qayerda|qaerda|qancha|necha|ayt|ko'rsat|top|ber|yubor)",
+      "(linkini?|saytini?|websaytini?|manzilini?|telefonini?|raqamini?)\\s+(yubor|ber|ko'rsat|ayt|top)",
+      "(link|sayt|website|manzil|address|telefon|phone)\\s*(ini?|ini)?\\s*(yubor|ber|ayt|top)",
+      "(batafsil|full)\\s*(ma'lumot|info|details?)"
+    ],
+    "keywords": [
+      "batafsil",
+      "manzil",
+      "kontakt",
+      "telefon"
+    ]
+  },
+  "university_search": {
+    "label": "Universitet qidiruvi",
+    "tool": "search_university",
+    "handler": "search_university",
+    "priority": 0.8,
+    "dataIntent": true,
+    "selfComplete": false,
+    "patterns": [
+      "(necha|nechta|qancha|barcha|hamma|jami|umumiy|soni|sanoq|ro'yxati)\\s+(universitet|oliygoh|institut)",
+      "(universitet|oliygoh|institut)\\s+(necha|nechta|qancha|bor|bormi|soni|ro'yxati|turlari|sanoq)",
+      "(universitet|university|oliygoh|institut)\\s+(haqida|ma'lumot|info)",
+      "(qanday|qaysi)\\s+(universitet|oliygoh)",
+      "universitetlari?(ni|ning|lar)?\\s+(ro'yxati|ko'rsat|top|ayt)",
+      "(davlat|xususiy|xalqaro|private|public|state|international|nodavlat)\\s+(universitet|oliygoh|institut)",
+      "(davlat|xususiy|xalqaro|nodavlat)(?:lar|lari|larning|larining|ning|ni|da|dan|dagi|ga)?$",
+      "(toshkent|samarqand|buxoro|andijon|farg'ona|namangan|qarshi|urganch|nukus)(\\s+\\w+)?(da|dagi)?\\s+(?:[\\w'’,-]+\\s+){0,4}(universitet|oliygoh|institut)",
+      "(universitet|oliygoh|institut)(i|lar|lari|ni|ning|da|dan|ga|dagi|imiz)?\\s+(bormi|mavjudmi|bormikan)",
+      "universitet\\s+(necha|qancha)",
+      "(ozbekistonda|o'zbekistonda|respublikada|mamlakatda)\\s+(necha|nechta|qancha)\\s+(universitet|oliygoh)",
+      "universitetlar\\s+(necha|nechta|qancha)",
+      "(qanday)\\s+(turlari|turi)\\s+(bor|bormi)",
+      "(viloyat|region|hudud)\\s+(boyicha|buyicha)\\s+(universitet)",
+      "\\b(TKXU|TKTU|TDTU|TDIU|TDYU|SamDU|BuxDU|FarDU|NamDU|SamSI|TMI|TQI|ToshFA|ToshDTU|ToshKEU|TTA|TTPI|TATI|PDP|INHA|WIUT|Amity|Westminster|MDIS|TUIT|TATU|ADU|MIS|MESI|UrDU|QarDU|AndDU|TerDU|NavDPI|JDPU|TDPU|ToshSEI|TMCI)\\b.{0,50}?(haqida|ma'lumot)",
+      "(haqida|ma'lumot|qachon|tashkil|asos sol|ochilgan|hamkorlik|grant|kontrakt|narx|yotoqxona)\\s+.*\\b(universitet|oliygoh|institut)\\b",
+      "\\buniversiteti?(da|ning|ga|ni|dan|dagi)?\\s+(haqida|ma'lumot|qachon|grant|bormi|yotoqxona|narx|kontrakt|hamkorlik|qanday|qayer|tashkil)",
+      "\\buniversiteti?(da|ning|ga|ni|dan|dagi)?\\s+.*\\s+(grant|kontrakt|narx|yotoqxona|hamkorlik)",
+      "[\\w\\s'-]+(?:universiteti?|instituti?|institut|oliygohi?|oliygoh|akademiyasi?|akademiyasi|kolleji?)$",
+      "(?:[\\w'’,.-]+\\s+){0,3}(?:akademiya|akademiyasi|instituti|universiteti)\\s*(haqida|ma'lumot|ayt|haqida\\s+ayt|haqida\\s+ma'lumot)"
+    ],
+    "keywords": []
+  },
+  "direction_list": {
+    "label": "Yo'nalishlar katalogi",
+    "tool": "list_directions",
+    "handler": "list_directions",
+    "priority": 0.87,
+    "dataIntent": true,
+    "selfComplete": true,
+    "patterns": [
+      "(qanday|qanaqa|qaysi)\\s+(yo'nalish|yonalish|mutaxassislik|soha)(lar|lari)?\\s+(mavjud|bor|bormi|ro'yxati|katalogi)",
+      "(yo'nalish|yonalish)(lar|lari)?\\s+(ro'yxati|katalogi|mavjudlari|mavjud|bor|bormi)",
+      "(eng)\\s+(talab|ko'p|mashhur|yaxshi|kerakli|qiziqarli|yaxshi|ommabop)\\s+(yo'nalish|mutaxassislik|soha|kasb)(lar|lari)?",
+      "(talab|mashhur|popular|top|best)\\s+(yo'nalish|mutaxassislik|soha|kasb|direction|field)"
+    ],
+    "keywords": []
+  },
+  "grant_list": {
+    "label": "Grantlar katalogi",
+    "tool": "search_grants",
+    "handler": "search_grants",
+    "priority": 0.85,
+    "dataIntent": true,
+    "selfComplete": true,
+    "patterns": [
+      "(qanday|qanaqa|qaysi)\\s+(grant|stipendiya|scholarship)(lar)?\\s+(bor|bormi|mavjud|mavjudmi|ro'yxati|katalogi)",
+      "(grant|stipendiya)(lar)?\\s+(ro'yxati|katalogi|mavjudlari)"
+    ],
+    "keywords": []
+  },
+  "grant_search": {
+    "label": "Grant qidiruvi",
+    "tool": "search_grants",
+    "handler": "search_grants",
+    "priority": 0.8,
+    "dataIntent": true,
+    "selfComplete": false,
+    "patterns": [
+      "(grant|stipendiya|scholarship|chegirma|diskont)",
+      "(bepul|tekin|pulsiz|free)\\s+(o'qish|ta'lim)",
+      "(grant|scholarship)\\s+(bor|bormi|mavjud)",
+      "(100%|50%|foiz|percent)\\s+(grant|chegirma)",
+      "(IELTS|SAT)\\s+(grant|stipendiya)"
+    ],
+    "keywords": []
+  },
+  "recommendation": {
+    "label": "Tavsiya / maslahat",
+    "tool": "recommend",
+    "handler": "recommend",
+    "priority": 0.86,
+    "dataIntent": true,
+    "responseStrategy": "hybrid",
+    "selfComplete": false,
+    "patterns": [
+      "(tavsiya|maslahat|recommend|suggestion)",
+      "(tavsiya)\\s+(qil|qilasiz|qilasan|qiladi|ber|bering|berasiz)",
+      "(yo'nalish)\\s+(tavsiya|maslahat|tanlash|topish)",
+      "(qaysi)\\s+(universitet|yaxshi|afzal|yaxshiroq|tanlasam|tavsiya|yo'nalish|soha|kasb)",
+      "(tanla|tanlash|tanlamoq|tanlov)",
+      "(qayerda|qaerda|qayerga|qayerni)\\s+(o'qish|o'qiy|o'qimoqchi|kirish|topish|topshirsam|topshirish|hujjat)",
+      "(qayerda|qaerda|qayerga|qayerni|qaysi\\s+joyda)\\s*(topshirsam|topshirsam\\s+yaxshi|o'qisam\\s+yaxshi|kirsam\\s+yaxshi)",
+      "(mosi|mosi\\s+qaysi|mos\\s+keladigan|mos\\s+keladi|mos\\s+keladigani)",
+      "(bilmayman|tushunmayapman|aniq emas|qaror qilolmay)",
+      "(yaxshisi|eng yaxshi|eng ma'qul|optimal)",
+      "(menga)\\s+(universitet|yo'nalish|grant|ta'lim)\\s+(top|tanla|tavsiya|ko'rsat|ber)",
+      "(universitet|oqish joyi)\\s+(tavsiya qil|tanla|top|kerak)",
+      "(nima|qanaqa|nimalari?)\\s+(o'qisam|o'qiyman|o'qishim|o'qisa)",
+      "(men|menga|bizga)?\\s*(oqishga|o'qishga|oliygohga|universitetga)\\s+(kira|kirish|kirmoqchi|kirmoqchiman|kirgani|kirsam|topshirmoqchi|topshirmoqchiman|topshiraman|topshirmoqchi)",
+      "(bu\\s+yil|yil)\\s+(o'qishga|oqishga)\\s+(kirmoqchi|kirmoqchiman|kirmoqchiman|kiraman|kirishim)",
+      "(xorijga|chet\\s+elga|abroad|dunyoga)",
+      "(IELTS|TOEFL|SAT|sertifikat)",
+      "(yordam\\s+(bering|ber|kerak)|help)",
+      "(matematikam|fizikam|kimyom|biologiyam|inglizim|adabiyotim)",
+      "(o'qisam|o'qishim|kirishim)\\s*(kerak|mumkin)?\\s*(olamanmi|bo'ladimi|bo'ladi)",
+      "(eng talab yuqori|talabgir|most demanded|popular|top)",
+      "(sirtqi|kechki|masofaviy)\\s*(ta'lim|o'qish|o'qiyman)?"
+    ],
+    "keywords": []
+  },
+  "direction_search": {
+    "label": "Yo'nalish qidiruvi",
+    "tool": "search_direction",
+    "handler": "search_direction",
+    "priority": 0.8,
+    "dataIntent": true,
+    "selfComplete": false,
+    "patterns": [
+      "(yo'nalish|yonalish|direction|mutaxassislik|dastur|program|kurs)",
+      "qaysi\\s+(yo'nalish|yonalish|fan|soha)",
+      "(o'qish|o'qi)\\s+(uchun|kerak|mumkin)",
+      "\\b(IT|dasturlash|injiniring)\\b",
+      "\\b(tibbiyot|iqtisod|pedagogika|huquq|muhandislik|filologiya|san'at|sanat|sport|turizm|qishloq)(?:lari?|lar|ning|ni|ga|da|dan|dagi|im|ing|imiz|ingiz)?\\b",
+      "(bakalavr|magistr|magistratura|doktorantura|phd)",
+      "(kunduzgi|sirtqi|kechki|masofaviy)"
+    ],
+    "keywords": []
+  },
+  "news_list": {
+    "label": "Yangiliklar katalogi",
+    "tool": "search_news",
+    "handler": "search_news",
+    "priority": 0.85,
+    "dataIntent": true,
+    "selfComplete": true,
+    "patterns": [
+      "(qanday|qanaqa|qaysi)\\s+(yangilik|news)(lar)?\\s+(bor|bormi|mavjud|mavjudmi|ro'yxati|katalogi)",
+      "^(yangiliklar|news)\\s*(bormi|mavjudmi|mavjud)?"
+    ],
+    "keywords": []
+  },
+  "news_search": {
+    "label": "Yangilik qidiruvi",
+    "tool": "search_news",
+    "handler": "search_news",
+    "priority": 0.8,
+    "dataIntent": true,
+    "selfComplete": true,
+    "patterns": [
+      "(yangilik|news|yangilangan|yangilanish|e'lon|xabar)",
+      "(so'nggi|oxirgi|yangi|bugungi|yangiliklar)"
+    ],
+    "keywords": []
+  },
+  "admission": {
+    "label": "Qabul / hujjat topshirish",
+    "tool": "get_university",
+    "handler": "get_admission",
+    "priority": 0.8,
+    "dataIntent": false,
+    "selfComplete": true,
+    "patterns": [
+      "(qabul|admission|acceptance|hujjat|ro'yxatdan\\s+o'tish)",
+      "(qachon|muddat|deadline|start|tugash)\\s+(qabul|admission)",
+      "(ochiq|yopiq|davom|tugagan)(mi|midi)?\\s*(qabul|admission)",
+      "(kirish|o'tish|ball|bala)\\s*(ballari?|bal)?",
+      "(qanday|qaysi)\\s+fan(lar)?\\s+(topshiraman|topshirish|kerak)",
+      "(imtihon|test)\\s*(qachon|kuni|muddat|sanasi)?",
+      "(qabul|topshirish|hujjat)\\s+(qanday|qachon|muddat)",
+      "(o'qishga|oqishga)\\s+(kira|kirish)\\s*(olamanmi|imkon|shart|talab)",
+      "(passing|entrance|admission)\\s*(score|exam|deadline|date)?"
+    ],
+    "keywords": []
+  },
+  "transfer": {
+    "label": "Ko'chirish (transfer)",
+    "tool": "search_direction",
+    "handler": "get_transfer",
+    "priority": 0.8,
+    "dataIntent": false,
+    "selfComplete": true,
+    "patterns": [
+      "(ko'chirish|transfer|o'tish|ko'chir|transferable)",
+      "(bir\\s+universitetdan|boshqa\\s+universitetga)"
+    ],
+    "keywords": []
+  },
+  "general_chat": {
+    "label": "Umumiy suhbat / maslahat (LLM)",
+    "tool": "none",
+    "handler": "none",
+    "priority": 0.8,
+    "dataIntent": false,
+    "responseStrategy": "llm",
+    "selfComplete": true,
+    "patterns": [],
+    "keywords": []
+  },
+  "faq": {
+    "label": "Umumiy savol",
+    "tool": "none",
+    "handler": "none",
+    "priority": 0.8,
+    "dataIntent": false,
+    "selfComplete": true,
+    "patterns": [
+      "(qanday|qayerdan|qachon|kim|nima|necha|nima\\s+uchun|how|what|when|where|why)"
+    ],
+    "keywords": []
+  },
+  "unknown": {
+    "label": "Aniqlanmagan",
+    "tool": "none",
+    "handler": "none",
+    "priority": 0.3,
+    "dataIntent": false,
+    "selfComplete": false,
+    "patterns": [],
+    "keywords": []
+  }
+}
