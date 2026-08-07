@@ -9,6 +9,8 @@ import type { ChatMessage, SessionContext } from "@/types";
 
 // request.url ishlatilgani uchun statik render qilinmaydi (DYNAMIC_SERVER_USAGE xatosini oldini oladi)
 export const dynamic = "force-dynamic";
+// Vercel serverless funksiya limiti: standart 10s — AI + API chaqiruvlari uzoqroq davom etishi mumkin
+export const maxDuration = 60;
 
 export async function POST(request: NextRequest) {
   try {
