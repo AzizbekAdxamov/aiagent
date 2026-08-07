@@ -43,7 +43,7 @@ export function ChatMessage({ id, sessionId, role, content, intent, timestamp }:
   return (
     <div
       className={cn(
-        "flex items-start gap-3 px-4 sm:px-6 py-4 message-enter group",
+        "flex items-start gap-2.5 sm:gap-3 px-3 sm:px-6 py-3 sm:py-3.5 message-enter group",
         isUser ? "flex-row-reverse" : "flex-row"
       )}
     >
@@ -64,20 +64,20 @@ export function ChatMessage({ id, sessionId, role, content, intent, timestamp }:
       </div>
 
       {/* Message Content */}
-      <div className={cn("max-w-[85%] sm:max-w-[75%] space-y-1.5", isUser ? "items-end" : "items-start")}>
+      <div className={cn("min-w-0 max-w-[92%] sm:max-w-[85%] space-y-1.5", isUser ? "items-end" : "items-start")}>
         {/* Header */}
-        <div className="flex items-center gap-2 px-1">
-          <span className="text-xs font-medium text-gray-400">
+        <div className={cn("flex items-center gap-2 px-1", isUser && "flex-row-reverse")}>
+          <span className="text-[11px] font-medium text-gray-400 dark:text-gray-500">
             {isUser ? "Siz" : "Mentalaba AI"}
           </span>
           {!isUser && intent && intent !== "unknown" && (
-            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-gradient-to-r from-primary-50 to-secondary-50 text-primary-600 text-[10px] font-semibold tracking-wide">
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-gradient-to-r from-primary-50 to-secondary-50 dark:from-primary-950/50 dark:to-secondary-950/50 text-primary-600 dark:text-primary-300 text-[10px] font-semibold tracking-wide">
               <Sparkles className="w-2.5 h-2.5" />
               {getIntentLabel(intent)}
             </span>
           )}
           {timestamp && (
-            <span className="text-[10px] text-gray-300">
+            <span className="text-[10px] text-gray-300 dark:text-gray-600">
               {timestamp.toLocaleTimeString("uz-UZ", {
                 hour: "2-digit",
                 minute: "2-digit",
@@ -89,14 +89,14 @@ export function ChatMessage({ id, sessionId, role, content, intent, timestamp }:
         {/* Content */}
         <div
           className={cn(
-            "relative rounded-2xl px-4 py-3 text-sm leading-relaxed",
+            "relative rounded-2xl px-4 sm:px-5 py-3 sm:py-3.5 text-[15px] leading-relaxed break-words transition-colors duration-300",
             isUser
               ? "bg-gradient-to-r from-primary-500 to-primary-600 text-white rounded-tr-md shadow-md"
-              : "glass-card rounded-tl-md"
+              : "bg-white/90 dark:bg-gray-800/90 backdrop-blur-xl border border-white/60 dark:border-gray-700 shadow-sm rounded-tl-md"
           )}
         >
           {isUser ? (
-            <p className="whitespace-pre-wrap">{content}</p>
+            <p className="whitespace-pre-wrap break-words">{content}</p>
           ) : (
             <RichContent content={content} />
           )}
@@ -104,10 +104,11 @@ export function ChatMessage({ id, sessionId, role, content, intent, timestamp }:
 
         {/* Copy button for assistant messages */}
         {!isUser && (
-          <div className="opacity-0 group-hover:opacity-100 transition-all duration-200 flex items-center gap-1">
+          /* Mobil/touch'da doim ko'rinadi; desktop'da faqat hover'da */
+          <div className="opacity-100 lg:opacity-0 lg:group-hover:opacity-100 transition-all duration-200 flex items-center gap-1">
             <button
               onClick={handleCopy}
-              className="flex items-center gap-1 px-2 py-1 rounded-lg hover:bg-gray-100 text-[10px] text-gray-400 hover:text-gray-600"
+              className="flex items-center gap-1 px-2 py-1 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 text-[10px] text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300"
             >
               {copied ? (
                 <>
@@ -126,8 +127,8 @@ export function ChatMessage({ id, sessionId, role, content, intent, timestamp }:
               disabled={!sessionId || feedback !== null}
               title="Javob foydali"
               className={cn(
-                "p-1 rounded-lg text-gray-400 hover:bg-green-50 hover:text-green-600 disabled:cursor-default",
-                feedback === 1 && "bg-green-50 text-green-600"
+                "p-1 rounded-lg text-gray-400 dark:text-gray-500 hover:bg-green-50 dark:hover:bg-green-950/40 hover:text-green-600 dark:hover:text-green-400 disabled:cursor-default",
+                feedback === 1 && "bg-green-50 dark:bg-green-950/40 text-green-600 dark:text-green-400"
               )}
             >
               <ThumbsUp className="w-3.5 h-3.5" />
@@ -137,8 +138,8 @@ export function ChatMessage({ id, sessionId, role, content, intent, timestamp }:
               disabled={!sessionId || feedback !== null}
               title="Javob foydasiz"
               className={cn(
-                "p-1 rounded-lg text-gray-400 hover:bg-red-50 hover:text-red-600 disabled:cursor-default",
-                feedback === -1 && "bg-red-50 text-red-600"
+                "p-1 rounded-lg text-gray-400 dark:text-gray-500 hover:bg-red-50 dark:hover:bg-red-950/40 hover:text-red-600 dark:hover:text-red-400 disabled:cursor-default",
+                feedback === -1 && "bg-red-50 dark:bg-red-950/40 text-red-600 dark:text-red-400"
               )}
             >
               <ThumbsDown className="w-3.5 h-3.5" />

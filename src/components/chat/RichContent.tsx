@@ -7,22 +7,18 @@ import { GrantCard } from "@/components/cards/GrantCard";
 import { NewsCard } from "@/components/cards/NewsCard";
 import { CardGallery } from "./CardGallery";
 import { ComparisonTable } from "./ComparisonTable";
-import {
-  ExternalLink,
-  ChevronDown,
-  ChevronUp,
-  Check,
-  Copy,
-  Brain,
-  Sparkles,
-  Building2,
-  BookOpen,
-  Award,
-  Newspaper,
-} from "lucide-react";
+import { Check, Copy } from "lucide-react";
 
 interface ParsedBlock {
-  type: "text" | "university-list" | "university" | "direction" | "grant" | "news" | "comparison" | "section-header";
+  type:
+    | "text"
+    | "university-list"
+    | "university"
+    | "direction"
+    | "grant"
+    | "news"
+    | "comparison"
+    | "section-header";
   content: any;
   html?: string;
 }
@@ -32,18 +28,31 @@ export function RichContent({ content }: { content: string }) {
   const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-2.5">
       {blocks.map((block, index) => {
         switch (block.type) {
-          case "section-header":
+          case "section-header": {
+            const { level, title } = block.content || {};
+            const sizeClass =
+              level >= 3
+                ? "text-[15px] sm:text-base"
+                : level === 2
+                ? "text-base sm:text-lg"
+                : "text-lg sm:text-xl";
             return (
-              <div key={index} className="flex items-center gap-2 pt-2 pb-1">
-                <div className="w-1 h-6 rounded-full bg-gradient-to-b from-primary-400 to-secondary-500" />
-                <h3 className="text-sm font-bold text-gray-800">
-                  {block.content}
+              <div
+                key={index}
+                className="flex items-center gap-2.5 pt-2 pb-1 -mx-1"
+              >
+                <div className="w-1 self-stretch min-h-5 rounded-full bg-gradient-to-b from-primary-400 to-secondary-500" />
+                <h3
+                  className={`${sizeClass} font-bold text-gray-800 dark:text-gray-100 tracking-tight leading-snug`}
+                >
+                  {title}
                 </h3>
               </div>
             );
+          }
 
           case "university-list":
             return <CardGallery key={index} items={block.content} type="university" />;
@@ -84,12 +93,9 @@ export function RichContent({ content }: { content: string }) {
             return block.html ? (
               <div
                 key={index}
-                className="prose-custom text-sm leading-relaxed text-gray-700"
+                className="text-[15px] leading-relaxed text-gray-700 dark:text-gray-300 break-words"
               >
-                <div
-                  className="inline"
-                  dangerouslySetInnerHTML={{ __html: block.html }}
-                />
+                <div dangerouslySetInnerHTML={{ __html: block.html }} />
                 {block.html.length > 1000 && (
                   <button
                     onClick={() => {
@@ -97,12 +103,16 @@ export function RichContent({ content }: { content: string }) {
                       setCopiedIndex(index);
                       setTimeout(() => setCopiedIndex(null), 2000);
                     }}
-                    className="inline-flex items-center gap-1 ml-1 text-primary-500 hover:text-primary-600 text-xs transition-colors"
+                    className="mt-1 inline-flex items-center gap-1.5 text-primary-500 dark:text-primary-400 hover:text-primary-700 dark:hover:text-primary-300 text-xs font-medium transition-colors"
                   >
                     {copiedIndex === index ? (
-                      <><Check className="w-3 h-3 text-green-500" /> Nusxalandi</>
+                      <>
+                        <Check className="w-3.5 h-3.5 text-green-500" /> Nusxalandi
+                      </>
                     ) : (
-                      <><Copy className="w-3 h-3" /> Nusxa olish</>
+                      <>
+                        <Copy className="w-3.5 h-3.5" /> Nusxa olish
+                      </>
                     )}
                   </button>
                 )}
@@ -113,6 +123,10 @@ export function RichContent({ content }: { content: string }) {
     </div>
   );
 }
+
+/* ============================================================
+   BLOCK PARSER — matnni mantiqiy bloklarga bo'ladi
+   ============================================================ */
 
 function parseContent(text: string): ParsedBlock[] {
   const blocks: ParsedBlock[] = [];
@@ -133,29 +147,39 @@ function parseContent(text: string): ParsedBlock[] {
     const line = lines[i];
     const trimmed = line.trim();
 
-    // Section header detection
-    if (/^#{1,3}\s+(.+)+$/.test(trimmed)) {
+    // Section header detection (level saqlanadi)
+    const headerMatch = trimmed.match(/^(#{1,3})\s+(.+)$/);
+    if (headerMatch) {
       flushText();
-      const title = trimmed.replace(/^#+\s*/, "");
-      blocks.push({ type: "section-header", content: title, html: undefined });
+      blocks.push({
+        type: "section-header",
+        content: {
+          level: headerMatch[1].length,
+          title: headerMatch[2].trim(),
+        },
+        html: undefined,
+      });
       continue;
     }
 
-    // University card detection: "**N. University Name**"
-    // or numbered list with university names followed by details
-    const uniMatch = trimmed.match(
-      /^\*\*(\d+\.\s*)?(.+?)(?:\*\*)?\s*(🏛|🌍|🏢)?\s*(💰|🏠)?$/
-    );
-    if (uniMatch && (trimmed.includes("🏛") || trimmed.includes("🌍") || trimmed.includes("🏢"))) {
+    // University card detection: "**N. University Name** 🏛" (+ details)
+    if (
+      (trimmed.includes("🏛") || trimmed.includes("🌍") || trimmed.includes("🏢")) &&
+      trimmed.match(/^\*\*(\d+\.\s*)?.+?(\*\*)?\s*[🏛🌍🏢]?\s*[💰🏠]?$/)
+    ) {
       flushText();
-      // Gather university details from next lines until empty line
       const details: string[] = [];
       let j = i + 1;
-      while (j < lines.length && lines[j].trim() !== "" && !lines[j].trim().match(/^\*\*/)) {
+      while (
+        j < lines.length &&
+        lines[j].trim() !== "" &&
+        !lines[j].trim().match(/^\*\*/) &&
+        !lines[j].trim().match(/^#{1,3}\s/)
+      ) {
         details.push(lines[j]);
         j++;
       }
-      
+
       blocks.push({
         type: "university",
         content: extractUniversityFromMarkdown(trimmed, details),
@@ -169,7 +193,12 @@ function parseContent(text: string): ParsedBlock[] {
       flushText();
       const grantLines: string[] = [trimmed];
       let j = i + 1;
-      while (j < lines.length && lines[j].trim() !== "" && !lines[j].trim().match(/^\d\.\s/)) {
+      while (
+        j < lines.length &&
+        lines[j].trim() !== "" &&
+        !lines[j].trim().match(/^\d+\.\s/) &&
+        !lines[j].trim().match(/^#{1,3}\s/)
+      ) {
         grantLines.push(lines[j]);
         j++;
       }
@@ -186,7 +215,11 @@ function parseContent(text: string): ParsedBlock[] {
       flushText();
       const newsLines: string[] = [trimmed];
       let j = i + 1;
-      while (j < lines.length && lines[j].trim() !== "") {
+      while (
+        j < lines.length &&
+        lines[j].trim() !== "" &&
+        !lines[j].trim().match(/^#{1,3}\s/)
+      ) {
         newsLines.push(lines[j]);
         j++;
       }
@@ -198,8 +231,11 @@ function parseContent(text: string): ParsedBlock[] {
       continue;
     }
 
-    // Comparison table detection (contains | separator and comparison keywords)
-    if (trimmed.includes("|") && trimmed.match(/\b(University|Universitet|Turi|Manzil|Grant|To'lov)\b/i)) {
+    // Comparison table detection (| separator + comparison keywords)
+    if (
+      trimmed.includes("|") &&
+      trimmed.match(/\b(University|Universitet|Turi|Manzil|Grant|To'lov|Yo'nalish)\b/i)
+    ) {
       flushText();
       const tableLines: string[] = [trimmed];
       let j = i + 1;
@@ -220,7 +256,12 @@ function parseContent(text: string): ParsedBlock[] {
       flushText();
       const dirLines: string[] = [trimmed];
       let j = i + 1;
-      while (j < lines.length && lines[j].trim() !== "" && !lines[j].trim().match(/^\d+\./)) {
+      while (
+        j < lines.length &&
+        lines[j].trim() !== "" &&
+        !lines[j].trim().match(/^\d+\./) &&
+        !lines[j].trim().match(/^#{1,3}\s/)
+      ) {
         dirLines.push(lines[j]);
         j++;
       }
@@ -239,8 +280,287 @@ function parseContent(text: string): ParsedBlock[] {
   return blocks;
 }
 
+/* ============================================================
+   MARKDOWN → HTML (to'g'ri blok asosidagi renderer)
+   ============================================================ */
+
+function renderMarkdown(text: string): string {
+  if (!text.trim()) return "";
+
+  const lines = text.split("\n");
+  const blocks: string[] = [];
+  const buf: string[] = [];
+
+  const flushBuf = () => {
+    if (buf.length > 0) {
+      blocks.push(renderParagraph(buf.join("\n")));
+      buf.length = 0;
+    }
+  };
+
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+    const t = line.trim();
+
+    if (t === "") {
+      flushBuf();
+      i++;
+      continue;
+    }
+
+    // Fenced code block
+    if (t.startsWith("```")) {
+      flushBuf();
+      const lang = t.replace(/^```/, "").trim();
+      const codeLines: string[] = [];
+      i++;
+      while (i < lines.length && !lines[i].trim().startsWith("```")) {
+        codeLines.push(lines[i]);
+        i++;
+      }
+      i++; // skip closing fence
+      blocks.push(renderCodeBlock(codeLines.join("\n"), lang));
+      continue;
+    }
+
+    // Horizontal rule
+    if (/^(-{3,}|\*{3,}|_{3,})$/.test(t)) {
+      flushBuf();
+      blocks.push('<hr class="my-4 border-gray-100" />');
+      i++;
+      continue;
+    }
+
+    // Heading (parseContent tashqarida oladi, lekin xavfsizlik uchun ham shu yerda)
+    if (/^#{1,6}\s+/.test(t)) {
+      flushBuf();
+      const level = (t.match(/^#+/) || [""])[0].length;
+      blocks.push(renderHeading(t.replace(/^#+\s*/, ""), level));
+      i++;
+      continue;
+    }
+
+    // Blockquote (ketma-ket)
+    if (/^>\s?/.test(t)) {
+      flushBuf();
+      const quotes: string[] = [];
+      while (i < lines.length && /^>\s?/.test(lines[i].trim())) {
+        quotes.push(lines[i].trim().replace(/^>\s?/, ""));
+        i++;
+      }
+      blocks.push(renderBlockquote(quotes));
+      continue;
+    }
+
+    // List (ketma-ket bir xil turdagi + indentlangan davom qatorlari)
+    const isOrdered = /^\d+[.)]\s+/.test(t);
+    if (isOrdered || /^[-•*]\s+/.test(t)) {
+      flushBuf();
+      const items: string[] = [];
+      let current = "";
+      while (i < lines.length) {
+        const raw = lines[i];
+        const lt = raw.trim();
+        if (isOrdered ? /^\d+[.)]\s+/.test(lt) : /^[-•*]\s+/.test(lt)) {
+          if (current) items.push(current);
+          current = lt.replace(/^\d+[.)]\s+/, "").replace(/^[-•*]\s+/, "");
+          i++;
+        } else if (lt !== "" && /^\s/.test(raw) && current) {
+          // oldingi item'ning davomi (masalan link qatori)
+          current += "\n" + lt;
+          i++;
+        } else {
+          break;
+        }
+      }
+      if (current) items.push(current);
+      blocks.push(renderList(items, isOrdered));
+      continue;
+    }
+
+    // Table (ketma-ket | qatorlar)
+    if (t.includes("|")) {
+      const tableLines: string[] = [];
+      let j = i;
+      while (j < lines.length && lines[j].trim().includes("|")) {
+        tableLines.push(lines[j]);
+        j++;
+      }
+      if (tableLines.length >= 2) {
+        flushBuf();
+        blocks.push(renderTable(tableLines));
+        i = j;
+        continue;
+      }
+    }
+
+    buf.push(line);
+    i++;
+  }
+  flushBuf();
+
+  return blocks.join("");
+}
+
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+/** Inline formatlash: kod, bold, italic, linklar, qator tanaffuslari */
+function renderInline(text: string): string {
+  let html = escapeHtml(text);
+
+  // Inline code
+  html = html.replace(
+    /`([^`\n]+)`/g,
+    '<code class="bg-primary-50 dark:bg-primary-950/40 text-primary-700 dark:text-primary-300 px-1.5 py-0.5 rounded-md text-[13px] font-mono border border-primary-100 dark:border-primary-900">$1</code>'
+  );
+
+  // Bold + italic
+  html = html.replace(
+    /\*\*\*(.+?)\*\*\*/g,
+    '<strong class="font-bold text-gray-900 dark:text-gray-100"><em>$1</em></strong>'
+  );
+  // Bold
+  html = html.replace(
+    /\*\*(.+?)\*\*/g,
+    '<strong class="font-semibold text-gray-900 dark:text-gray-100">$1</strong>'
+  );
+  // Italic
+  html = html.replace(
+    /\*([^*\n]+)\*/g,
+    '<em class="text-gray-600 dark:text-gray-400">$1</em>'
+  );
+
+  // Links
+  html = html.replace(
+    /\[([^\]]+)\]\(([^)\s]+)\)/g,
+    (_match: string, linkText: string, url: string) => {
+      // Xavfsizlik: faqat http/https linklar chiqadi (javascript: kabi sxemalar bloklanadi)
+      if (!/^https?:\/\//i.test(url)) {
+        return `<span>${linkText}</span>`;
+      }
+      if (/[🏛🌍🏢💰📚📰📌👉🏻🎓📞🌐🔍📄🏠]/u.test(linkText)) {
+        return `<a href="${url}" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-primary-50 dark:bg-primary-950/40 hover:bg-primary-100 dark:hover:bg-primary-900/40 text-primary-700 dark:text-primary-300 hover:text-primary-800 dark:hover:text-primary-200 text-[13px] font-medium transition-all duration-200 border border-primary-100 dark:border-primary-900 hover:border-primary-200 dark:hover:border-primary-700 shadow-sm hover:shadow">${linkText}</a>`;
+      }
+      return `<a href="${url}" target="_blank" rel="noopener noreferrer" class="text-primary-600 dark:text-primary-400 hover:text-primary-700 dark:hover:text-primary-300 underline decoration-primary-300 dark:decoration-primary-700 hover:decoration-primary-500 dark:hover:decoration-primary-500 transition-all duration-200 font-medium break-all">${linkText} ↗</a>`;
+    }
+  );
+
+  // Line breaks
+  html = html.replace(/\n/g, "<br/>");
+
+  return html;
+}
+
+function renderParagraph(text: string): string {
+  const inline = renderInline(text.trim());
+  if (!inline) return "";
+  return `<p class="my-1.5">${inline}</p>`;
+}
+
+function renderHeading(title: string, level: number): string {
+  const size =
+    level === 1
+      ? "text-lg sm:text-xl"
+      : level === 2
+      ? "text-base sm:text-lg"
+      : "text-[15px] sm:text-base";
+  return `<h${level} class="text-gray-800 dark:text-gray-100 font-bold ${size} my-2.5 leading-snug">${renderInline(
+    title
+  )}</h${level}>`;
+}
+
+function renderList(items: string[], ordered: boolean): string {
+  const lis = items
+    .map((item, idx) => {
+      const content = renderInline(item);
+      if (ordered) {
+        return `<li class="flex items-start gap-2.5 my-1"><span class="mt-[2px] w-5 h-5 shrink-0 rounded-full bg-primary-50 dark:bg-primary-950/40 text-primary-600 dark:text-primary-300 text-[11px] font-bold flex items-center justify-center">${
+          idx + 1
+        }</span><span class="min-w-0 flex-1">${content}</span></li>`;
+      }
+      return `<li class="flex items-start gap-2.5 my-1"><span class="mt-[7px] w-1.5 h-1.5 shrink-0 rounded-full bg-primary-400"></span><span class="min-w-0 flex-1">${content}</span></li>`;
+    })
+    .join("");
+  const tag = ordered ? "ol" : "ul";
+  return `<${tag} class="my-2 space-y-0.5 list-none pl-0">${lis}</${tag}>`;
+}
+
+function renderTable(lines: string[]): string {
+  const rows = lines.filter(
+    (l) => l.trim().includes("|") && !/^\|?[\s:|-]+\|?$/.test(l.trim())
+  );
+  if (rows.length === 0) return "";
+
+  let html =
+    '<div class="my-3 overflow-x-auto rounded-xl border border-gray-100 dark:border-gray-700 shadow-sm bg-white dark:bg-gray-800"><table class="min-w-full text-[13px] leading-relaxed divide-y divide-gray-100 dark:divide-gray-700">';
+
+  rows.forEach((row, ri) => {
+    const cells = row
+      .split("|")
+      .map((c) => c.trim())
+      .filter(Boolean);
+    if (cells.length === 0) return;
+
+    if (ri === 0) {
+      html += "<thead><tr>";
+      cells.forEach((c) => {
+        html += `<th class="px-3.5 py-2.5 bg-gray-50 dark:bg-gray-700/60 text-left text-xs font-semibold text-gray-500 dark:text-gray-300 uppercase tracking-wider whitespace-nowrap">${renderInline(
+          c.replace(/\*\*/g, "")
+        )}</th>`;
+      });
+      html += "</tr></thead><tbody>";
+    } else {
+      html += `<tr class="${
+        ri % 2 === 1 ? "bg-white dark:bg-gray-800" : "bg-gray-50/40 dark:bg-gray-800/40"
+      } hover:bg-primary-50/30 dark:hover:bg-primary-900/20 transition-colors">`;
+      cells.forEach((c) => {
+        html += `<td class="px-3.5 py-2.5 text-gray-600 dark:text-gray-300 align-top">${renderInline(
+          c
+        )}</td>`;
+      });
+      html += "</tr>";
+    }
+  });
+
+  html += "</tbody></table></div>";
+  return html;
+}
+
+function renderBlockquote(lines: string[]): string {
+  const content = lines.map((l) => renderInline(l)).join("<br/>");
+  return `<blockquote class="border-l-4 border-primary-300 dark:border-primary-700 bg-primary-50/40 dark:bg-primary-950/30 pl-4 py-2.5 my-2 text-gray-600 dark:text-gray-400 italic rounded-r-xl">${content}</blockquote>`;
+}
+
+function renderCodeBlock(code: string, lang: string): string {
+  const escaped = escapeHtml(code.trimEnd());
+  const langLabel = lang
+    ? `<div class="flex items-center justify-between px-4 py-2 bg-gray-800 rounded-t-xl border-b border-gray-700"><span class="text-gray-300 text-xs font-mono">${escapeHtml(
+        lang
+      )}</span><span class="text-gray-500 text-xs">code</span></div>`
+    : "";
+  return `<div class="my-3">${langLabel}<pre class="code-block ${
+    lang ? "rounded-t-none" : ""
+  }"><code>${escaped}</code></pre></div>`;
+}
+
+/* ============================================================
+   KARTOCHEKALAR UCHUN EXTRACTORLAR
+   ============================================================ */
+
 function extractUniversityFromMarkdown(title: string, details: string[]): any {
-  const name = title.replace(/^\*\*/, "").replace(/\*\*$/, "").replace(/^\d+\.\s*/, "").replace(/[🏛🌍🏢💰🏠]\s*/g, "").trim();
+  const name = title
+    .replace(/^\*\*/, "")
+    .replace(/\*\*$/, "")
+    .replace(/^\d+\.\s*/, "")
+    .replace(/[🏛🌍🏢💰🏠]\s*/g, "")
+    .trim();
   const uni: any = { fullNameUz: name };
 
   for (const line of details) {
@@ -249,8 +569,7 @@ function extractUniversityFromMarkdown(title: string, details: string[]): any {
     else if (l.includes("💵") || l.includes("💰")) uni.tuition = l.replace(/[💵💰]\s*/, "").replace(/\*/, "").trim();
     else if (l.includes("🏛") || l.includes("Davlat") || l.includes("Xususiy") || l.includes("Xalqaro")) {
       uni.institutionCategory = l.replace(/[🏛🏢🌍]\s*/, "").trim();
-    }
-    else if (l.includes("Grant")) uni.hasGrant = l.includes("Available") || l.includes("Mavjud") || l.includes("✅");
+    } else if (l.includes("Grant")) uni.hasGrant = l.includes("Available") || l.includes("Mavjud") || l.includes("✅");
     else if (l.includes("Accommodation") || l.includes("Yotoqxona")) uni.hasAccommodation = l.includes("Available") || l.includes("Bor") || l.includes("✅");
     else if (l.includes("Admission")) uni.isOpenForAdmission = l.includes("Open") || l.includes("Ochiq") || l.includes("✅");
     else if (l.includes("Slug:")) uni.slug = l.replace(/.*Slug[^:]*:\s*/i, "").trim();
@@ -307,13 +626,20 @@ function parseComparisonTable(lines: string[]): any[] {
   for (const line of lines) {
     const l = line.trim();
     if (l.includes("|") && l.includes("**")) {
-      const name = l.replace(/\|/g, "").replace(/\*\*/g, "").replace(/^\d+\.\s*/, "").trim();
+      const name = l
+        .replace(/\|/g, "")
+        .replace(/\*\*/g, "")
+        .replace(/^\d+\.\s*/, "")
+        .trim();
       if (name) {
         currentUni = { name };
         items.push(currentUni);
       }
     } else if (currentUni && l.includes("|")) {
-      const cells = l.split("|").map((c: string) => c.trim()).filter(Boolean);
+      const cells = l
+        .split("|")
+        .map((c: string) => c.trim())
+        .filter(Boolean);
       if (cells.length >= 2) {
         const key = cells[0].replace(/\*\*/g, "").trim();
         const val = cells[1].replace(/\*\*/g, "").trim();
@@ -330,179 +656,4 @@ function parseComparisonTable(lines: string[]): any[] {
   }
 
   return items;
-}
-
-/**
- * Markdown matnni HTML ga aylantirish (yaxshilangan versiya)
- */
-function renderMarkdown(text: string): string {
-  if (!text.trim()) return "";
-
-  let html = text;
-
-  // Escape HTML
-  html = html.replace(/</g, "&lt;").replace(/>/g, "&gt;");
-
-  // Code blocks (triple backticks) must be processed FIRST
-  html = html.replace(
-    /```(\w*)\n([\s\S]*?)```/g,
-    (_match: string, lang: string, code: string) => {
-      const langLabel = lang
-        ? `<div class="flex items-center justify-between px-4 py-2 bg-gray-900 rounded-t-xl border-b border-gray-700">
-            <span class="text-gray-400 text-xs font-mono">${lang}</span>
-            <span class="text-gray-500 text-xs">code</span>
-          </div>`
-        : "";
-      return `${langLabel}<pre class="code-block ${lang ? "rounded-t-none" : ""}"><code>${code
-        .trim()
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;")}</code></pre>`;
-    }
-  );
-
-  // Inline code
-  html = html.replace(
-    /`([^`]+)`/g,
-    '<code class="bg-primary-50 text-primary-700 px-1.5 py-0.5 rounded-md text-xs font-mono border border-primary-100">$1</code>'
-  );
-
-  // Headers (skip if they're just section markers)
-  html = html.replace(
-    /^### (.+)$/gm,
-    '<h3 class="text-primary-600 font-bold text-base mt-4 mb-2">$1</h3>'
-  );
-  html = html.replace(
-    /^## (.+)$/gm,
-    '<h2 class="text-primary-600 font-bold text-lg mt-5 mb-2">$1</h2>'
-  );
-  html = html.replace(
-    /^# (.+)$/gm,
-    '<h1 class="text-primary-600 font-bold text-xl mt-5 mb-3">$1</h1>'
-  );
-
-  // Bold + italic
-  html = html.replace(
-    /\*\*\*(.+?)\*\*\*/g,
-    '<strong class="font-bold text-gray-900"><em>$1</em></strong>'
-  );
-  html = html.replace(
-    /\*\*(.+?)\*\*/g,
-    '<strong class="font-semibold text-gray-900">$1</strong>'
-  );
-  html = html.replace(/\*(.+?)\*/g, '<em class="text-gray-600">$1</em>');
-
-  // Links with emoji
-  html = html.replace(
-    /\[([^\]]+)\]\(([^)]+)\)/g,
-    (_match: string, linkText: string, url: string) => {
-      if (linkText.match(/[🏛🌍🏢💰📚📰📌👉🏻]/)) {
-        return `<a href="${url}" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-primary-50 hover:bg-primary-100 text-primary-700 hover:text-primary-800 text-xs font-medium transition-all duration-200 border border-primary-100 hover:border-primary-200 shadow-sm hover:shadow">
-          ${linkText}
-        </a>`;
-      }
-      return `<a href="${url}" target="_blank" rel="noopener noreferrer" class="text-primary-600 hover:text-primary-700 underline decoration-primary-300 hover:decoration-primary-500 transition-all duration-200 font-medium">${linkText} ↗</a>`;
-    }
-  );
-
-  // Tables
-  if (html.includes("|") && html.includes("\n|")) {
-    html = html.replace(
-      /(\|.+\|\s*\n)(\|[-|:\s]+\|\s*\n)?((?:\|.+\|\s*\n?)*)/g,
-      (_match: string, headerRow: string, _sepRow: string, bodyRows: string) => {
-        const headers = headerRow
-          .split("|")
-          .filter((h: string) => h.trim())
-          .map((h: string) => h.trim());
-        let tableHtml =
-          '<div class="overflow-x-auto my-3 rounded-xl border border-gray-100 shadow-sm"><table class="min-w-full text-xs divide-y divide-gray-100">';
-
-        tableHtml += "<thead><tr>";
-        headers.forEach((h: string) => {
-          tableHtml += `<th class="px-3 py-2.5 bg-gray-50 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">${h}</th>`;
-        });
-        tableHtml += "</tr></thead>";
-
-        tableHtml += "<tbody class='divide-y divide-gray-50'>";
-        const rows = bodyRows.trim().split("\n");
-        rows.forEach((row: string, idx: number) => {
-          const cells = row
-            .split("|")
-            .filter((c: string) => c.trim())
-            .map((c: string) => c.trim());
-          if (cells.length > 0) {
-            tableHtml += `<tr class="${idx % 2 === 0 ? "bg-white" : "bg-gray-50/50"} hover:bg-primary-50/30 transition-colors">`;
-            cells.forEach((cell: string) => {
-              tableHtml += `<td class="px-3 py-2.5 text-gray-600">${cell}</td>`;
-            });
-            tableHtml += "</tr>";
-          }
-        });
-        tableHtml += "</tbody></table></div>";
-
-        return tableHtml;
-      }
-    );
-  }
-
-  // Unordered lists
-  html = html.replace(
-    /^[\s]*[-*•]\s(.+)$/gm,
-    '<li class="flex items-start gap-2 text-gray-700"><span class="text-primary-400 mt-1.5 w-1.5 h-1.5 rounded-full bg-primary-400 flex-shrink-0"></span><span>$1</span></li>'
-  );
-  html = html.replace(
-    /((?:<li.*>.*<\/li>\n?)+)/g,
-    '<ul class="space-y-1 my-2 pl-0">$1</ul>'
-  );
-
-  // Ordered lists
-  html = html.replace(
-    /^(\d+)\.\s(.+)$/gm,
-    '<li class="flex items-start gap-2 text-gray-700"><span class="text-primary-500 font-semibold text-xs mt-1 bg-primary-50 w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0">$1</span><span>$2</span></li>'
-  );
-  html = html.replace(
-    /((?:<li.*>.*<\/li>\n?)+)/g,
-    (match: string) => {
-      // Don't wrap if already wrapped in ul/ol
-      if (match.includes("<ul") || match.includes("<ol")) return match;
-      // Check if first li uses the numbered format
-      if (match.match(/<li.*>.*<\/li>/)) {
-        const firstLi = match.match(/<li[^>]*>(\d+)<\/span>/);
-        if (firstLi) return `<ol class="space-y-1.5 my-2 pl-0 list-none">${match}</ol>`;
-      }
-      return match;
-    }
-  );
-
-  // Blockquotes
-  html = html.replace(
-    /^>\s(.+)$/gm,
-    '<blockquote class="border-l-4 border-primary-300 bg-primary-50/30 pl-4 py-2 my-2 text-gray-600 italic rounded-r-lg">$1</blockquote>'
-  );
-
-  // Horizontal rules
-  html = html.replace(/^---+$/gm, '<hr class="my-4 border-gray-100" />');
-
-  // Handle line breaks
-  html = html.replace(/\n\n/g, "</p><p class='my-2'>");
-  html = html.replace(/\n/g, "<br/>");
-
-  // Wrap in paragraph if needed
-  if (
-    !html.startsWith("<h") &&
-    !html.startsWith("<p") &&
-    !html.startsWith("<ul") &&
-    !html.startsWith("<ol") &&
-    !html.startsWith("<div") &&
-    !html.startsWith("<pre") &&
-    !html.startsWith("<blockquote") &&
-    !html.startsWith("<table") &&
-    !html.startsWith("<li")
-  ) {
-    html = `<p class="my-1">${html}</p>`;
-  }
-
-  // Clean up
-  html = html.replace(/<p class="my-[01]"><\/p>/g, "");
-
-  return html;
 }

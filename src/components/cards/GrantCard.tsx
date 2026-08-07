@@ -24,7 +24,7 @@ export function GrantCard({ grant }: GrantCardProps) {
   const isLong = description.length > 150;
 
   return (
-    <div className="bg-white border border-gray-100 rounded-2xl shadow-sm overflow-hidden card-hover hover:shadow-md transition-all duration-300">
+    <div className="bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 rounded-2xl shadow-sm overflow-hidden card-hover hover:shadow-md">
       {/* Image */}
       {grant.grantImage && (
         <div className="relative h-32 overflow-hidden">
@@ -41,13 +41,13 @@ export function GrantCard({ grant }: GrantCardProps) {
       <div className="p-4 space-y-3">
         {/* Title & University */}
         <div>
-          <h3 className="text-sm font-semibold text-gray-800 leading-tight">
+          <h3 className="text-sm font-semibold text-gray-800 dark:text-gray-100 leading-tight">
             {grant.grantTitleUz || grant.grantTitleEn}
           </h3>
           {grant.universityNameUz && (
             <div className="flex items-center gap-1 mt-1">
-              <Building2 className="w-3 h-3 text-gray-400" />
-              <p className="text-xs text-gray-500">{grant.universityNameUz}</p>
+              <Building2 className="w-3 h-3 text-gray-400 dark:text-gray-500" />
+              <p className="text-xs text-gray-500 dark:text-gray-400">{grant.universityNameUz}</p>
             </div>
           )}
         </div>
@@ -55,13 +55,13 @@ export function GrantCard({ grant }: GrantCardProps) {
         {/* Info Badges */}
         <div className="flex flex-wrap gap-1.5">
           {grant.regionNameUz && (
-            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-amber-50 text-amber-700 text-xs">
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 text-xs">
               <MapPin className="w-3 h-3" />
               {grant.regionNameUz}
             </span>
           )}
           {grant.createdAt && (
-            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-gray-50 text-gray-500 text-xs">
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-gray-50 dark:bg-gray-800 text-gray-500 dark:text-gray-400 text-xs">
               <Calendar className="w-3 h-3" />
               {new Date(grant.createdAt).toLocaleDateString("uz-UZ")}
             </span>
@@ -71,13 +71,13 @@ export function GrantCard({ grant }: GrantCardProps) {
         {/* Description */}
         {description && (
           <div>
-            <p className={`text-xs text-gray-500 leading-relaxed ${!expanded && isLong ? "line-clamp-3" : ""}`}>
+            <p className={`text-xs text-gray-500 dark:text-gray-400 leading-relaxed ${!expanded && isLong ? "line-clamp-3" : ""}`}>
               {description}
             </p>
             {isLong && (
               <button
                 onClick={() => setExpanded(!expanded)}
-                className="flex items-center gap-1 mt-1 text-xs text-primary-600 hover:text-primary-700 font-medium"
+                className="flex items-center gap-1 mt-1 text-xs text-primary-600 dark:text-primary-400 hover:text-primary-700 dark:hover:text-primary-300 font-medium"
               >
                 {expanded ? (
                   <>Qisqartirish <ChevronUp className="w-3 h-3" /></>

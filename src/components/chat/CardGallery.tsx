@@ -72,9 +72,9 @@ export function CardGallery({ items, type }: CardGalleryProps) {
       {canScrollLeft && (
         <button
           onClick={() => scroll("left")}
-          className="absolute -left-2 top-1/2 -translate-y-1/2 z-10 w-8 h-8 rounded-full bg-white border border-gray-200 shadow-lg flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all duration-200 hover:bg-gray-50 hover:scale-110"
+          className="absolute -left-2 top-1/2 -translate-y-1/2 z-10 w-8 h-8 rounded-full bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 shadow-lg flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all duration-200 hover:bg-gray-50 dark:hover:bg-gray-700 hover:scale-110"
         >
-          <ChevronLeft className="w-4 h-4 text-gray-600" />
+          <ChevronLeft className="w-4 h-4 text-gray-600 dark:text-gray-300" />
         </button>
       )}
 
@@ -114,9 +114,9 @@ export function CardGallery({ items, type }: CardGalleryProps) {
       {canScrollRight && (
         <button
           onClick={() => scroll("right")}
-          className="absolute -right-2 top-1/2 -translate-y-1/2 z-10 w-8 h-8 rounded-full bg-white border border-gray-200 shadow-lg flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all duration-200 hover:bg-gray-50 hover:scale-110"
+          className="absolute -right-2 top-1/2 -translate-y-1/2 z-10 w-8 h-8 rounded-full bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 shadow-lg flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all duration-200 hover:bg-gray-50 dark:hover:bg-gray-700 hover:scale-110"
         >
-          <ChevronRight className="w-4 h-4 text-gray-600" />
+          <ChevronRight className="w-4 h-4 text-gray-600 dark:text-gray-300" />
         </button>
       )}
 
@@ -126,7 +126,7 @@ export function CardGallery({ items, type }: CardGalleryProps) {
           {items.slice(0, Math.min(items.length, 7)).map((_, idx) => (
             <div
               key={idx}
-              className="w-1.5 h-1.5 rounded-full bg-gray-300 transition-all duration-300"
+              className="w-1.5 h-1.5 rounded-full bg-gray-300 dark:bg-gray-600 transition-all duration-300"
               style={{
                 opacity: 0.5,
               }}

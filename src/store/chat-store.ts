@@ -13,8 +13,10 @@ interface ChatState {
   currentSessionId: string | null;
   isStreaming: boolean;
   isLoading: boolean;
+  sessionsLoading: boolean;
   error: string | null;
   language: "uz" | "ru" | "en";
+  theme: "light" | "dark";
   sidebarOpen: boolean;
 
   // Session context
@@ -24,10 +26,13 @@ interface ChatState {
   // Actions
   setLanguage: (lang: "uz" | "ru" | "en") => void;
   toggleSidebar: () => void;
+  setTheme: (t: "light" | "dark") => void;
+  toggleTheme: () => void;
   sendMessage: (content: string) => Promise<void>;
   loadSessions: () => Promise<void>;
   loadSession: (sessionId: string) => Promise<void>;
   newSession: () => void;
+  deleteSession: (sessionId: string) => Promise<void>;
   clearError: () => void;
 }
 
@@ -37,8 +42,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
   currentSessionId: null,
   isStreaming: false,
   isLoading: false,
+  // Dastlab true — Sidebar birinchi yuklashda skeleton ko'rsatadi
+  sessionsLoading: true,
   error: null,
   language: "uz",
+  // MUHIM (hydration): doim "light" boshlanadi — SSR va client bir xil render
+  // qiladi. Haqiqiy rejim DOM'dan (layout skripti qo'shgan class) mount'da
+  // sinxronlanadi — mismatch bo'lmaydi.
+  theme: "light",
   sidebarOpen: true,
   currentUniversity: null,
   currentDirection: null,
@@ -46,6 +57,20 @@ export const useChatStore = create<ChatState>((set, get) => ({
   setLanguage: (lang) => set({ language: lang }),
 
   toggleSidebar: () => set((state) => ({ sidebarOpen: !state.sidebarOpen })),
+
+  setTheme: (t) => {
+    set({ theme: t });
+    try {
+      localStorage.setItem("mentalaba-theme", t);
+      document.documentElement.classList.toggle("dark", t === "dark");
+    } catch (e) {
+      /* localStorage mavjud bo'lmaganda */
+    }
+  },
+
+  toggleTheme: () => {
+    get().setTheme(get().theme === "light" ? "dark" : "light");
+  },
 
   sendMessage: async (content: string) => {
     const state = get();
@@ -108,14 +133,40 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   loadSessions: async () => {
+    // Skeleton faqat ro'yxat BO'SH bo'lganda ko'rsatiladi —
+    // har bir xabardan keyin miltillamasligi uchun
+    set((s) => ({ sessionsLoading: s.sessions.length === 0 }));
     try {
       const response = await fetch("/api/v1/chat");
       if (response.ok) {
         const result = await response.json();
-        set({ sessions: result.data || [] });
+        set({ sessions: result.data || [], sessionsLoading: false });
+      } else {
+        set({ sessionsLoading: false });
       }
     } catch (error) {
       console.error("Failed to load sessions:", error);
+      set({ sessionsLoading: false });
+    }
+  },
+
+  deleteSession: async (sessionId: string) => {
+    try {
+      const response = await fetch(
+        `/api/v1/chat?sessionId=${encodeURIComponent(sessionId)}`,
+        { method: "DELETE" }
+      );
+      if (response.ok) {
+        set((s) => ({
+          sessions: s.sessions.filter((x) => x.id !== sessionId),
+        }));
+        // O'chirilgan session hozirgi bo'lsa — yangi bo'sh suhbatga o'tamiz
+        if (get().currentSessionId === sessionId) {
+          get().newSession();
+        }
+      }
+    } catch (error) {
+      console.error("Failed to delete session:", error);
     }
   },
 

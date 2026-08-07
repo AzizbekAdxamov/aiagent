@@ -11,7 +11,7 @@ export function LoadingState() {
       </div>
 
       {/* Loading dots */}
-      <div className="flex items-center gap-1.5 bg-white border border-gray-100 rounded-2xl rounded-bl-md px-4 py-3 shadow-sm">
+      <div className="flex items-center gap-1.5 bg-white dark:bg-gray-800 border border-gray-100 dark:border-gray-700 rounded-2xl rounded-bl-md px-4 py-3 shadow-sm">
         <div className="typing-dot" />
         <div className="typing-dot" />
         <div className="typing-dot" />

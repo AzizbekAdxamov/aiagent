@@ -383,6 +383,46 @@ export async function GET(request: NextRequest) {
   }
 }
 
+export async function DELETE(request: NextRequest) {
+  try {
+    const { searchParams } = new URL(request.url);
+    const sessionId = searchParams.get("sessionId");
+
+    if (!sessionId) {
+      return NextResponse.json(
+        { success: false, error: "sessionId is required" },
+        { status: 400 }
+      );
+    }
+
+    const session = await prisma.chatSession.findUnique({
+      where: { id: sessionId },
+    });
+    if (!session) {
+      return NextResponse.json(
+        { success: false, error: "Session not found" },
+        { status: 404 }
+      );
+    }
+
+    // Tartib muhim: avval feedback, keyin messages, keyin session
+    // (FK cheklovlari tufayli — chat_feedback va chat_messages session'ga bog'langan)
+    await prisma.$transaction([
+      prisma.chatFeedback.deleteMany({ where: { sessionId } }),
+      prisma.chatMessage.deleteMany({ where: { sessionId } }),
+      prisma.chatSession.delete({ where: { id: sessionId } }),
+    ]);
+
+    return NextResponse.json({ success: true });
+  } catch (error) {
+    console.error("[Delete Session Error]", error);
+    return NextResponse.json(
+      { success: false, error: "Internal server error" },
+      { status: 500 }
+    );
+  }
+}
+
 function getSuggestions(intent: string): string[] {
   switch (intent) {
     case "university_search":

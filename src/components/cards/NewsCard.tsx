@@ -21,7 +21,7 @@ export function NewsCard({ news }: NewsCardProps) {
   const isLong = description.length > 200;
 
   return (
-    <div className="bg-white border border-gray-100 rounded-2xl shadow-sm overflow-hidden card-hover hover:shadow-md transition-all duration-300">
+    <div className="bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 rounded-2xl shadow-sm overflow-hidden card-hover hover:shadow-md">
       {/* Image */}
       {news.headerImage && (
         <div className="relative h-36 overflow-hidden">
@@ -37,14 +37,14 @@ export function NewsCard({ news }: NewsCardProps) {
       {/* Content */}
       <div className="p-4 space-y-2.5">
         {/* Title */}
-        <h3 className="text-sm font-semibold text-gray-800 leading-tight line-clamp-2">
+        <h3 className="text-sm font-semibold text-gray-800 dark:text-gray-100 leading-tight line-clamp-2">
           {news.titleUz || news.titleEn}
         </h3>
 
         {/* Meta */}
         <div className="flex items-center gap-3">
           {news.createdAt && (
-            <span className="flex items-center gap-1 text-xs text-gray-400">
+            <span className="flex items-center gap-1 text-xs text-gray-400 dark:text-gray-500">
               <Calendar className="w-3 h-3" />
               {new Date(news.createdAt).toLocaleDateString("uz-UZ", {
                 day: "numeric",
@@ -54,7 +54,7 @@ export function NewsCard({ news }: NewsCardProps) {
             </span>
           )}
           {news.viewsCount !== undefined && (
-            <span className="flex items-center gap-1 text-xs text-gray-400">
+            <span className="flex items-center gap-1 text-xs text-gray-400 dark:text-gray-500">
               <Eye className="w-3 h-3" />
               {news.viewsCount}
             </span>
@@ -64,13 +64,13 @@ export function NewsCard({ news }: NewsCardProps) {
         {/* Description */}
         {description && (
           <div>
-            <p className={`text-xs text-gray-500 leading-relaxed ${!expanded && isLong ? "line-clamp-2" : ""}`}>
+            <p className={`text-xs text-gray-500 dark:text-gray-400 leading-relaxed ${!expanded && isLong ? "line-clamp-2" : ""}`}>
               {description}
             </p>
             {isLong && (
               <button
                 onClick={() => setExpanded(!expanded)}
-                className="flex items-center gap-1 mt-1 text-xs text-primary-600 hover:text-primary-700 font-medium"
+                className="flex items-center gap-1 mt-1 text-xs text-primary-600 dark:text-primary-400 hover:text-primary-700 dark:hover:text-primary-300 font-medium"
               >
                 {expanded ? (
                   <>Qisqartirish <ChevronUp className="w-3 h-3" /></>

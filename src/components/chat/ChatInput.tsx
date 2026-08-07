@@ -36,15 +36,15 @@ export function ChatInput() {
   };
 
   return (
-    <div className="border-t border-gray-100 bg-white/90 backdrop-blur-xl">
+    <div className="border-t border-gray-100 dark:border-gray-800 bg-white/90 dark:bg-gray-900/90 backdrop-blur-xl">
       <form onSubmit={handleSubmit} className="max-w-4xl mx-auto p-3 sm:p-4">
         <div
-          className={`relative flex items-end gap-2 bg-gray-50 rounded-2xl border-2 transition-all duration-300 ease-out ${
+          className={`relative flex items-end gap-2 bg-gray-50 dark:bg-gray-800/70 rounded-2xl border-2 transition-all duration-300 ease-out ${
             isFocused
-              ? "border-primary-400 bg-white shadow-lg shadow-primary-100"
+              ? "border-primary-400 bg-white dark:bg-gray-800 shadow-lg shadow-primary-100/60 dark:shadow-primary-900/30"
               : isHovered
-              ? "border-gray-200 bg-gray-50/80"
-              : "border-gray-100"
+              ? "border-gray-200 dark:border-gray-600 bg-gray-50/80 dark:bg-gray-800/50"
+              : "border-gray-100 dark:border-gray-700"
           }`}
           onMouseEnter={() => setIsHovered(true)}
           onMouseLeave={() => setIsHovered(false)}
@@ -61,7 +61,7 @@ export function ChatInput() {
               placeholder="Savolingizni yozing..."
               rows={1}
               disabled={isLoading}
-              className="w-full bg-transparent px-4 sm:px-5 py-3.5 text-sm text-gray-800 placeholder:text-gray-400 outline-none resize-none disabled:opacity-50 transition-colors"
+              className="w-full bg-transparent px-4 sm:px-5 py-3.5 text-[15px] text-gray-800 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-gray-500 outline-none resize-none disabled:opacity-50 transition-colors"
               style={{ minHeight: "48px", maxHeight: "150px" }}
             />
           </div>
@@ -75,7 +75,7 @@ export function ChatInput() {
               className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all duration-200 shadow-sm ${
                 input.trim() && !isLoading
                   ? "bg-gradient-to-r from-primary-500 to-primary-600 text-white hover:from-primary-600 hover:to-primary-700 shadow-md hover:shadow-lg active:scale-95"
-                  : "bg-gray-100 text-gray-400 cursor-not-allowed"
+                  : "bg-gray-100 dark:bg-gray-800 text-gray-400 dark:text-gray-500 cursor-not-allowed"
               }`}
             >
               {isLoading ? (
@@ -95,13 +95,13 @@ export function ChatInput() {
         <div className="flex items-center justify-between mt-2 px-1">
           <div className="flex items-center gap-1">
             <Sparkles className="w-3 h-3 text-primary-400" />
-            <p className="text-[10px] sm:text-xs text-gray-400">
+            <p className="text-[10px] sm:text-xs text-gray-400 dark:text-gray-500">
               Mentalaba AI — universitetlar, yo'nalishlar va grantlar
             </p>
           </div>
           {input.length > 0 && (
             <span className={`text-[10px] font-medium ${
-              input.length > 500 ? "text-amber-500" : "text-gray-400"
+              input.length > 500 ? "text-amber-500" : "text-gray-400 dark:text-gray-500"
             }`}>
               {input.length}
             </span>
