@@ -7,6 +7,9 @@ import prisma from "@/lib/prisma";
 import { sanitizeText } from "@/lib/sanitize-text";
 import type { ChatMessage, SessionContext } from "@/types";
 
+// request.url ishlatilgani uchun statik render qilinmaydi (DYNAMIC_SERVER_USAGE xatosini oldini oladi)
+export const dynamic = "force-dynamic";
+
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
