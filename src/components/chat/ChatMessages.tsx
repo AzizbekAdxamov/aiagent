@@ -102,7 +102,6 @@ export function ChatMessages() {
               role={msg.role as "user" | "assistant"}
               content={msg.content}
               intent={msg.intent}
-              selectedTool={msg.selectedTool}
               timestamp={msg.timestamp}
             />
           </div>

@@ -1,7 +1,7 @@
 "use client";
 
 import { cn } from "@/lib/cn";
-import { User, GraduationCap, Check, Copy, Sparkles, ThumbsUp, ThumbsDown, Lock, LogIn } from "lucide-react";
+import { User, GraduationCap, Check, Copy, Sparkles, ThumbsUp, ThumbsDown } from "lucide-react";
 import { useState } from "react";
 import { RichContent } from "./RichContent";
 
@@ -11,14 +11,11 @@ interface ChatMessageProps {
   role: "user" | "assistant";
   content: string;
   intent?: string;
-  /** GUEST REJIM: "auth_required" bo'lsa — login CTA kartasi ko'rsatiladi */
-  selectedTool?: string;
   timestamp?: Date;
 }
 
-export function ChatMessage({ id, sessionId, role, content, intent, selectedTool, timestamp }: ChatMessageProps) {
+export function ChatMessage({ id, sessionId, role, content, intent, timestamp }: ChatMessageProps) {
   const isUser = role === "user";
-  const isAuthRequired = !isUser && selectedTool === "auth_required";
   const [copied, setCopied] = useState(false);
   const [feedback, setFeedback] = useState<1 | -1 | null>(null);
 
@@ -89,25 +86,21 @@ export function ChatMessage({ id, sessionId, role, content, intent, selectedTool
           )}
         </div>
 
-        {/* Content — GUEST REJIM: auth_required bo'lsa login CTA kartasi */}
-        {isAuthRequired ? (
-          <LoginCtaCard content={content} />
-        ) : (
-          <div
-            className={cn(
-              "relative rounded-2xl px-4 sm:px-5 py-3 sm:py-3.5 text-[15px] leading-relaxed break-words transition-colors duration-300",
-              isUser
-                ? "bg-gradient-to-r from-primary-500 to-primary-600 text-white rounded-tr-md shadow-md"
-                : "bg-white/90 dark:bg-gray-800/90 backdrop-blur-xl border border-white/60 dark:border-gray-700 shadow-sm rounded-tl-md"
-            )}
-          >
-            {isUser ? (
-              <p className="whitespace-pre-wrap break-words">{content}</p>
-            ) : (
-              <RichContent content={content} />
-            )}
-          </div>
-        )}
+        {/* Content */}
+        <div
+          className={cn(
+            "relative rounded-2xl px-4 sm:px-5 py-3 sm:py-3.5 text-[15px] leading-relaxed break-words transition-colors duration-300",
+            isUser
+              ? "bg-gradient-to-r from-primary-500 to-primary-600 text-white rounded-tr-md shadow-md"
+              : "bg-white/90 dark:bg-gray-800/90 backdrop-blur-xl border border-white/60 dark:border-gray-700 shadow-sm rounded-tl-md"
+          )}
+        >
+          {isUser ? (
+            <p className="whitespace-pre-wrap break-words">{content}</p>
+          ) : (
+            <RichContent content={content} />
+          )}
+        </div>
 
         {/* Copy button for assistant messages */}
         {!isUser && (
@@ -153,51 +146,6 @@ export function ChatMessage({ id, sessionId, role, content, intent, selectedTool
             </button>
           </div>
         )}
-      </div>
-    </div>
-  );
-}
-
-/**
- * GUEST REJIM (BOSQICH 1 + GUEST): data tool'i bloklanganda ko'rsatiladigan
- * login CTA kartasi. Matn + aniq [ Kirish ] tugmasi — mentalaba.uz auth
- * sahifasiga olib boradi (redirect bilan qaytadi).
- */
-function LoginCtaCard({ content }: { content: string }) {
-  const currentUrl = typeof window !== "undefined" ? window.location.href : "";
-  const loginUrl = `https://mentalaba.uz/auth?sign-in&redirect=${encodeURIComponent(currentUrl)}`;
-  const signupUrl = `https://mentalaba.uz/auth?sign-up`;
-
-  return (
-    <div className="relative overflow-hidden rounded-2xl bg-white/90 dark:bg-gray-800/90 backdrop-blur-xl border border-primary-100 dark:border-primary-800/50 shadow-md rounded-tl-md">
-      {/* Gradient top bar */}
-      <div className="h-1.5 bg-gradient-to-r from-primary-500 via-secondary-500 to-purple-500" />
-
-      <div className="p-4 sm:p-5">
-        <div className="flex items-start gap-3">
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-primary-500 to-secondary-600 flex items-center justify-center flex-shrink-0 shadow-md shadow-primary-500/25">
-            <Lock className="w-5 h-5 text-white" />
-          </div>
-          <div className="flex-1 min-w-0">
-            <RichContent content={content} />
-          </div>
-        </div>
-
-        <div className="mt-4 flex flex-col sm:flex-row gap-2">
-          <a
-            href={loginUrl}
-            className="flex-1 inline-flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-xl bg-gradient-to-r from-primary-500 to-primary-600 text-white text-sm font-semibold shadow-md shadow-primary-500/25 hover:from-primary-600 hover:to-primary-700 hover:shadow-lg active:scale-[0.98] transition-all duration-200"
-          >
-            <LogIn className="w-4 h-4" />
-            Mentalaba accountiga kirish
-          </a>
-          <a
-            href={signupUrl}
-            className="flex-1 inline-flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-xl border border-gray-200 dark:border-gray-600 text-gray-600 dark:text-gray-300 text-sm font-medium hover:bg-gray-50 dark:hover:bg-gray-700 active:scale-[0.98] transition-all duration-200"
-          >
-            Ro'yxatdan o'tish
-          </a>
-        </div>
       </div>
     </div>
   );

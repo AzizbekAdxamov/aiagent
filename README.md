@@ -101,7 +101,7 @@ Guest'lar **Mentalaba API'ga umuman chiqmaydi** — login qilganda data ochiladi
 | Universitet / grant / kontrakt / yangilik / taqqoslash | 🔐 LOGIN so'raladi | ✅ |
 | Real ma'lumot (API) | ❌ bloklanadi | ✅ |
 
-- Guest data so'rasa: **"Bu ma'lumotni ko'rish uchun Mentalaba accountiga kiring"** + `[Kirish]` tugmasi
+- Guest data so'rasa: **"Bu ma'lumotni ko'rish uchun Mentalaba accountiga kiring"** + 🔑 kirish/ro'yxatdan o'tish havolalari (xabar ichida)
 - **401 ≠ ma'lumot yo'q**: token eskirgan/refresh ishlamagan bo'lsa (AUTH_EXPIRED) ham login so'raladi, "topilmadi" deyilmaydi
 - Guest javoblari cache'dan ham o'qilmaydi (login qilgan userning data javobi guest'ga chiqib ketmasligi uchun)
 - Guest uchun **global .env tokeni ishlatilmaydi** (faqat login qilgan user'ning o'z tokeni)
