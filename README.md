@@ -89,6 +89,24 @@ Login qilmagan foydalanuvchi ham AI'ni bemalol ishlatadi — **401 qo'yilmaydi**
 1. **URL parametr**: `?token=...&refreshToken=...` (mentalaba.uz redirect qilganda)
 2. **localStorage**: `accessToken` / `token` / `mentalaba_access_token` va boshqa kalitlar
 
+### 🛡️ TOOL ACCESS POLICY (guest vs login)
+
+Guest'lar **Mentalaba API'ga umuman chiqmaydi** — login qilganda data ochiladi:
+
+| So'rov turi | GUEST | LOGIN user |
+|---|---|---|
+| Suhbat, maslahat, greeting, savol | ✅ | ✅ |
+| Yo'nalishlar katalogi (statik) | ✅ | ✅ |
+| Maslahat dialogi (3 savol) | ✅ (API'siz) | ✅ |
+| Universitet / grant / kontrakt / yangilik / taqqoslash | 🔐 LOGIN so'raladi | ✅ |
+| Real ma'lumot (API) | ❌ bloklanadi | ✅ |
+
+- Guest data so'rasa: **"Bu ma'lumotni ko'rish uchun Mentalaba accountiga kiring"** + `[Kirish]` tugmasi
+- **401 ≠ ma'lumot yo'q**: token eskirgan/refresh ishlamagan bo'lsa (AUTH_EXPIRED) ham login so'raladi, "topilmadi" deyilmaydi
+- Guest javoblari cache'dan ham o'qilmaydi (login qilgan userning data javobi guest'ga chiqib ketmasligi uchun)
+- Guest uchun **global .env tokeni ishlatilmaydi** (faqat login qilgan user'ning o'z tokeni)
+- Guest'lar uchun LLM entity extraction ham chaqirilmaydi (token tejaladi)
+
 ### 🧹 GUEST MA'LUMOTLARNI TOZALASH (TTL)
 
 Guest session'lari suhbat davomiyligi uchun DB'da saqlanadi (tarixda ko'rinmaydi).

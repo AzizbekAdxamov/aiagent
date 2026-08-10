@@ -110,6 +110,9 @@ export async function POST(request: NextRequest) {
     // Build session context (metadata dan currentTopicName va keyingi follow-up ma'lumotlarini yuklash)
     const metadata = (session.metadata || {}) as Record<string, any>;
     const sessionContext: SessionContext = {
+      // GUEST REJIM: login qilmagan → isGuest=true → ToolAccessPolicy data
+      // tool'larini bloklaydi (Mentalaba API'ga chiqilmaydi, login so'raladi).
+      isGuest: !authUser,
       language: (session.language || "uz") as "uz" | "ru" | "en",
       currentUniversityId: session.currentUniversityId ?? undefined,
       currentDirectionId: session.currentDirectionId ?? undefined,

@@ -674,8 +674,48 @@ export class ToolRouter {
     return true;
   }
 
+  /**
+   * AUTH_EXPIRED ajratish (401 ≠ ma'lumot yo'q): tool xatolarida asl xabarni
+   * saqlaydi. Mentalaba API 401 qaytarsa (user tokeni eskirgan + refresh ham
+   * ishlamagan) external-api-patch 'AUTH_EXPIRED' markerli xato tashlaydi →
+   * bu yerda error="AUTH_EXPIRED" qaytadi → provider-manager "topilmadi"
+   * o'rniga LOGIN so'rovini ko'rsatadi (noto'g'ri "ma'lumot yo'q" emas).
+   */
+  private errorResult(tool: string, fallback: string, error?: any): ToolResult {
+    const msg = error?.message || (typeof error === "string" ? error : "") || "";
+    return {
+      tool: tool as any,
+      success: false,
+      error: /AUTH_EXPIRED/i.test(msg) ? "AUTH_EXPIRED" : msg || fallback,
+    };
+  }
+
   async execute(intent: IntentResult, sessionContext?: any, userMessage?: string): Promise<ToolResult[]> {
     const results: ToolResult[] = [];
+
+    // ===== TOOL ACCESS POLICY (BOSQICH 1 + GUEST) =====
+    // Login qilmagan (guest) foydalanuvchi MENTALABA API'ga chiqadigan
+    // handler'larni ishlata olmaydi — API UMUMAN chaqirilmaydi (global .env
+    // tokeni ham ishlatilmaydi). API'siz handlerlar ('none' suhbat/maslahat,
+    // 'list_directions' statik katalog) guest'lar uchun ochiq. Natija
+    // authRequired=true → provider-manager login so'rovini ko'rsatadi.
+    const API_HANDLERS = new Set([
+      "search_university", "search_direction", "search_grants", "search_news",
+      "search_tuition", "compare_universities", "get_admission",
+      "get_transfer", "explain_recommendation",
+      // MUHIM: "recommend" bloksetda EMAS — uning clarification dialogi API'siz
+      // ishlaydi (guest "Universitet tanlashda menga maslahat ber" deyishi mumkin).
+      // Real ma'lumot kerak bo'lganda recommend tool ichida bloklanadi.
+    ]);
+    const isGuest = sessionContext?.isGuest === true;
+    if (isGuest) {
+      const guestHandler = getIntentHandler(intent.intent);
+      if (API_HANDLERS.has(guestHandler)) {
+        console.log(`[ToolAccessPolicy] GUEST → "${intent.intent}" (${guestHandler}) BLOKLANDI — login talab qilinadi`);
+        results.push({ tool: intent.intent as any, success: false, authRequired: true });
+        return results;
+      }
+    }
 
     try {
       // BOSQICH 4 (JSON-driven config): intent → handler mapping intent-config.json dan.
@@ -1001,7 +1041,7 @@ export class ToolRouter {
       };
     } catch (error: any) {
       console.warn("[University Search Error]", error?.message);
-      return { tool: "search_university" as any, success: false, error: "Universitet ma'lumotlarini olishda xatolik" };
+      return this.errorResult("search_university", "Universitet ma'lumotlarini olishda xatolik", error);
     }
   }
 
@@ -1507,7 +1547,7 @@ export class ToolRouter {
         },
       };
     } catch (error) {
-      return { tool: "search_direction" as any, success: false, error: "Yo'nalish ma'lumotlarini olishda xatolik" };
+      return this.errorResult("search_direction", "Yo'nalish ma'lumotlarini olishda xatolik", error);
     }
   }
 
@@ -1820,7 +1860,7 @@ export class ToolRouter {
         },
       };
     } catch (error) {
-      return { tool: "search_tuition" as any, success: false, error: "Narx ma'lumotlarini olishda xatolik" };
+      return this.errorResult("search_tuition", "Narx ma'lumotlarini olishda xatolik", error);
     }
   }
 
@@ -1861,7 +1901,7 @@ export class ToolRouter {
         }),
       };
     } catch (error) {
-      return { tool: "search_grants" as any, success: false, error: "Grant ma'lumotlarini olishda xatolik" };
+      return this.errorResult("search_grants", "Grant ma'lumotlarini olishda xatolik", error);
     }
   }
 
@@ -1876,7 +1916,7 @@ export class ToolRouter {
         data: news.map((n: any) => this.normalizeKeys(n)),
       };
     } catch (error) {
-      return { tool: "search_news" as any, success: false, error: "Yangilik ma'lumotlarini olishda xatolik" };
+      return this.errorResult("search_news", "Yangilik ma'lumotlarini olishda xatolik", error);
     }
   }
 
@@ -2000,7 +2040,7 @@ export class ToolRouter {
         data: comparisonData,
       };
     } catch (error) {
-      return { tool: "compare_universities" as any, success: false, error: "Taqqoslash ma'lumotlarini olishda xatolik" };
+      return this.errorResult("compare_universities", "Taqqoslash ma'lumotlarini olishda xatolik", error);
     }
   }
 
@@ -2033,7 +2073,7 @@ export class ToolRouter {
         })),
       };
     } catch (error) {
-      return { tool: "get_university" as any, success: false, error: "Qabul ma'lumotlarini olishda xatolik" };
+      return this.errorResult("get_university", "Qabul ma'lumotlarini olishda xatolik", error);
     }
   }
 
@@ -2055,7 +2095,7 @@ export class ToolRouter {
           })),
       };
     } catch (error) {
-      return { tool: "search_direction" as any, success: false, error: "Ko'chirish ma'lumotlarini olishda xatolik" };
+      return this.errorResult("search_direction", "Ko'chirish ma'lumotlarini olishda xatolik", error);
     }
   }
 
@@ -2268,6 +2308,16 @@ export class ToolRouter {
             },
           },
         };
+      }
+
+      // ===== GUEST REJIM (BOSQICH 1 + GUEST) =====
+      // Clarification dialog (yuqorida) API'siz ishladi — "Qaysi shahar? Qanday
+      // yo'nalish? Davlatmi yoki xususiy?" suhbatini guest ham yuritishi mumkin.
+      // Endi REAL ma'lumot (API) kerak bo'lsa → bloklanadi, login so'raladi.
+      // (authRequired=true → provider-manager login so'rovini ko'rsatadi)
+      if (sessionContext?.isGuest) {
+        console.log(`[ToolAccessPolicy] GUEST → recommend (ma'lumot yig'ish) BLOKLANDI — login talab qilinadi`);
+        return { tool: "recommend" as any, success: false, authRequired: true };
       }
 
       // ===== 3. MA'LUMOTLARNI YIG'ISH =====
@@ -2584,7 +2634,7 @@ export class ToolRouter {
       };
     } catch (error: any) {
       console.warn("[Recommend Error]", error);
-      return { tool: "recommend" as any, success: false, error: "Tavsiya ma'lumotlarini olishda xatolik" };
+      return this.errorResult("recommend", "Tavsiya ma'lumotlarini olishda xatolik", error);
     }
   }
 

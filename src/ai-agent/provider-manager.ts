@@ -476,7 +476,9 @@ class ProviderManager {
       const cacheStrategy = getIntentResponseStrategy(intent.intent);
       const cacheKey = responseCache.buildKey(intent.intent, effectiveMessage, language);
       const cachedEntry = responseCache.get(cacheKey);
-      if (cachedEntry && cacheStrategy === "template" && getIntentDataFlag(intent.intent)) {
+      // GUEST REJIM: guest'lar uchun cache o'qilmaydi — login qilgan userning
+      // data javobi guest'ga qaytib ketishi mumkin (ma'lumot sizib chiqishi)!
+      if (cachedEntry && cacheStrategy === "template" && getIntentDataFlag(intent.intent) && sessionContext?.isGuest !== true) {
         console.log(`[Cache] HIT: ${cacheKey} (provider=${cachedEntry.provider})`);
         return {
           content: cachedEntry.content,
@@ -520,7 +522,10 @@ class ProviderManager {
       // LLM tahlil) — keyingi bosqichda template struktura + LLM matn aralashmasi
       // qo'shiladi. Hozircha farq yo'q, lekin log aniq ko'rsatsin:
       console.log(`[DEBUG] Response strategy: ${responseStrategy} (intent=${intent.intent})`);
-      if (this.initialized && needsLlm) {
+      // GUEST REJIM: guest'lar uchun LLM entity extraction CHAQIRILMAYDI —
+      // token tejaladi (guest javobi baribir bloklanadi yoki template bo'ladi).
+      // Faqat login qilgan user'lar uchun ishlaydi.
+      if (this.initialized && needsLlm && sessionContext?.isGuest !== true) {
         // Katalog intent'lari (*_list) o'z-o'zidan to'liq — entity'lar qo'shimcha
         // qiymat bermaydi, LLM chaqiruvi tejaladi.
         const isEntityRelevant =
@@ -570,6 +575,28 @@ class ProviderManager {
         }
       } catch (error) {
         console.error("[Tool Error]", error);
+      }
+
+      // ===== TOOL ACCESS POLICY / AUTH_REQUIRED (BOSQICH 1 + GUEST) =====
+      // Guest data tool'iga chiqmoqchi bo'lsa (tool-router authRequired qaytardi)
+      // YOKI user tokeni eskirib refresh ham ishlamagan bo'lsa (AUTH_EXPIRED) —
+      // API natijasi yo'q, LOGIN so'raladi. "ma'lumot topilmadi" deb yolg'on
+      // javob berilmaydi (401 ≠ ma'lumot yo'q).
+      const authRequired = toolResults.some((r: any) =>
+        r.authRequired === true ||
+        (typeof r.error === "string" && /AUTH_EXPIRED/i.test(r.error))
+      );
+      if (authRequired) {
+        const content = this.getAuthRequiredResponse(language);
+        console.log(`[AuthRequired] intent=${intent.intent} — login so'raladi (guest yoki token eskirgan)`);
+        return {
+          content,
+          intent: intent.intent,
+          // Frontend ChatMessage buni ushlab, LOGIN CTA kartasini ko'rsatadi
+          // (oddiy matn o'rniga [ Kirish ] tugmasi bilan)
+          toolUsed: "auth_required",
+          provider: "template",
+        };
       }
 
       // Step 3: DATA intents
@@ -1182,6 +1209,40 @@ class ProviderManager {
       entities,
       entityConfidence,
     });
+  }
+
+  /**
+   * AUTH REQUIRED RESPONSE (BOSQICH 1 + GUEST):
+   * Guest data tool'ini so'raganda yoki user tokeni eskirganda (AUTH_EXPIRED)
+   * qaytariladi. "ma'lumot topilmadi" o'rniga — login so'rovi. Kirish tugmasi
+   * mentalaba.uz auth sahifasiga olib boradi (frontend token'ni oladi).
+   */
+  private getAuthRequiredResponse(language: string): string {
+    if (language === "ru") {
+      return `🔐 **Для просмотра этой информации необходимо войти в аккаунт Mentalaba.**
+
+Университеты, направления, гранты и стоимость контрактов доступны авторизованным пользователям.
+
+[🔑 Войти в аккаунт Mentalaba](https://mentalaba.uz/auth?sign-in) · [Регистрация](https://mentalaba.uz/auth?sign-up)
+
+В чате, консультациях и общих вопросах я с радостью помогу без входа! 😊`;
+    }
+    if (language === "en") {
+      return `🔐 **You need to sign in to your Mentalaba account to view this information.**
+
+Universities, directions, grants and tuition fees are available to signed-in users.
+
+[🔑 Sign in to Mentalaba](https://mentalaba.uz/auth?sign-in) · [Create an account](https://mentalaba.uz/auth?sign-up)
+
+I'm happy to help with chat, advice and general questions without sign-in! 😊`;
+    }
+    return `🔐 **Bu ma'lumotni ko'rish uchun Mentalaba accountingizga kirishingiz kerak.**
+
+Universitetlar, yo'nalishlar, grantlar va kontrakt narxlari bo'yicha haqiqiy ma'lumotlar login qilgan foydalanuvchilar uchun ochiq.
+
+[🔑 Mentalaba accountiga kirish](https://mentalaba.uz/auth?sign-in) · [Ro'yxatdan o'tish](https://mentalaba.uz/auth?sign-up)
+
+Suhbat, maslahat va umumiy savollarda men sizga xohlagancha yordam beraman! 😊`;
   }
 
 }

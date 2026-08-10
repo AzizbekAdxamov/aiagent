@@ -276,6 +276,13 @@ export interface ToolResult {
   data?: any;
   error?: string;
   cached?: boolean;
+  /**
+   * TOOL ACCESS POLICY (GUEST REJIM): true bo'lsa tool data tool'i bo'lib,
+   * foydalanuvchi login qilmagan (guest) — Mentalaba API'ga UMUMAN
+   * chaqirilmaydi, login so'raladi. Yoki login qilingan bo'lsa ham user
+   * tokeni muddati tugab refresh ishlamagan (AUTH_EXPIRED).
+   */
+  authRequired?: boolean;
 }
 
 export interface ChatMessage {
@@ -349,6 +356,12 @@ export interface SessionContext {
    * Metadata JSON'da saqlanadi (Prisma ChatSession.metadata).
    */
   lastUniversity?: { id: number; name: string; slug?: string };
+  /**
+   * GUEST REJIM (BOSQICH 1 + GUEST): true = login qilmagan foydalanuvchi.
+   * Chat route authUser yo'q bo'lganda o'rnatadi — ToolAccessPolicy shunga
+   * qarab data tool'larini bloklaydi (Mentalaba API'ga chiqilmaydi).
+   */
+  isGuest?: boolean;
 }
 
 // ============ API Types ============

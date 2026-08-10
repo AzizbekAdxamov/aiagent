@@ -13,8 +13,11 @@ function patchedGetHeaders(): Record<string, string> {
     'Content-Type': 'application/json',
   };
   // PER-USER TOKEN (BOSQICH 1): user konteksti bo'lsa — user tokeni ishlatiladi
+  // GUEST REJIM: user konteksti BOR lekin accessToken bo'sh (guest) bo'lsa —
+  // global .env tokeni ISHLATILMAYDI (guest'lar Mentalaba API'ga chiqmaydi).
+  // Global token faqat apiAuthContext UMUMAN o'rnatilmagan hollarda ishlaydi.
   const userCtx = apiAuthContext.getStore();
-  const token = userCtx?.accessToken || apiAny.accessToken || '';
+  const token = userCtx ? userCtx.accessToken : (apiAny.accessToken || '');
   if (token) headers['Authorization'] = `Bearer ${token}`;
   return headers;
 }
@@ -52,8 +55,8 @@ async function patchedRequest(endpoint: string, options?: RequestInit): Promise<
           },
         });
       }
-    } else if (apiAny.refreshTokenValue || apiAny.refreshToken) {
-      // Global (admin) token — eski mexanizm
+    } else if (!apiAuthContext.getStore() && (apiAny.refreshTokenValue || apiAny.refreshToken)) {
+      // Global (admin) token — eski mexanizm, faqat user konteksti BO'LMASA
       try {
         if (typeof apiAny.refreshAccessToken === 'function') await apiAny.refreshAccessToken();
       } catch (e) {
@@ -66,6 +69,13 @@ async function patchedRequest(endpoint: string, options?: RequestInit): Promise<
           ...options?.headers,
         },
       });
+    }
+
+    // AUTH_EXPIRED (401 ≠ ma'lumot yo'q): refresh urinishlardan KEYIN hali ham
+    // 401 bo'lsa — markerli xato tashlanadi. Tool-router buni ushlab,
+    // "topilmadi" o'rniga LOGIN so'rovini ko'rsatadi (provider-manager).
+    if (response.status === 401) {
+      throw new Error('AUTH_EXPIRED: Mentalaba API 401 — token eskirgan, qayta login kerak');
     }
   }
 
