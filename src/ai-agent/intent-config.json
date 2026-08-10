@@ -281,7 +281,7 @@
       "(ochiq|yopiq|davom|tugagan)(mi|midi)?\\s*(qabul|admission)",
       "(kirish|o'tish|ball|bala)\\s*(ballari?|bal)?",
       "(qanday|qaysi)\\s+fan(lar)?\\s+(topshiraman|topshirish|kerak)",
-      "(imtihon|test)\\s*(qachon|kuni|muddat|sanasi)?",
+      "\\b(imtihon|test)\\b\\s*(qachon|kuni|muddat|sanasi)?",
       "(qabul|topshirish|hujjat)\\s+(qanday|qachon|muddat)",
       "(o'qishga|oqishga)\\s+(kira|kirish)\\s*(olamanmi|imkon|shart|talab)",
       "(passing|entrance|admission)\\s*(score|exam|deadline|date)?"

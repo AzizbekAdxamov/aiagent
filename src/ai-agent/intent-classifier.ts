@@ -418,8 +418,10 @@ export class IntentClassifier {
     // WHITELIST (EXPLICIT RECOMMEND TRIGGERS): faqat shu iboralar bilan
     // recommendation ishlaydi: "qaysi universitet", "universitet tavsiya qil",
     // "tanlasam", "topshirsam", "menga mos", "o'qishga kirmoqchiman"...
+    // MUHIM (fix): "yeqildim" (typo) ham ushlanadi — real foydalanuvchi shunday
+    // yozadi. "nima qilsam" ham qo'shildi (ilgari faqat qilaman/qilay bor edi).
     const GENERAL_CHAT_NEGATIVE =
-      /\b(maslahat|orzu\s+qilaman|imtihondan\s+yiqildim|yiqilib|afsus|depressiya|tushkunlik|ota-onam|motivatsiya|ruhiy|umidsiz|yig'layapman|yig'lab|nima\s+qilay|nima\s+qilaman|nima\s+qilishim|olmadim|kirmadim|hayot|hayotim|qo'rqaman|qiynalayapman|tushkun)\b/i;
+      /\b(maslahat|orzu\s+qilaman|(?:imtihondan\s+)?(?:yiqildim|yeqildim|yigildim|yiqilib|yeqilib)|afsus|depressiya|tushkunlik|ota-onam|motivatsiya|ruhiy|umidsiz|yig'layapman|yig'lab|nima\s+(?:qilay|qilaman|qilishim|qilsam)|olmadim|kirmadim|hayot|hayotim|qo'rqaman|qiynalayapman|tushkun)\b/i;
     const EXPLICIT_REC_TRIGGER =
       /\b(qaysi\s+(universitet|oliygoh|yo'nalish|soha|kasb)|universitet\s+(tavsiya|tanla|top|izla)|tavsiya\s+(qil|ber)|tanlasam|tanlashim|tanlamoqchiman|topshirsam|mos\s+(universitet|keladigan)|qayerga\s+(kirsam|topshirsam)|nima\s+o'qisam|o'qishga\s+(kirmoqchi|topshirmoqchi)|o'qimoqchiman|topshirmoqchiman|universitet\s+izlayapman)\b/i;
     // MUHIM (reviewer fix): override FAQAT suhbat-masalhat intentlariga qo'llanadi

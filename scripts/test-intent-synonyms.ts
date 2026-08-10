@@ -174,6 +174,12 @@ const cases: Array<{ msg: string; expectIntent?: string; expectDir?: string; exp
   { msg: "Qanday maslahat berasan?", expectIntent: "general_chat" },
   { msg: "Men universitetga kira olmadim", expectIntent: "general_chat" },
   { msg: "Salom. Men bu yil imtihondan yiqildim. Nima qilay?", expectIntent: "general_chat" },
+  // TYPO TOLERANCE (fix): "yeqildim" (typoli) va "nima qilsam bo'ladi" ham
+  // general_chat bo'lishi kerak — admission (Qabul) yutib yubormasligi kerak!
+  { msg: "men imtihondan yeqildim nima qilsam bo'ladi", expectIntent: "general_chat" },
+  { msg: "imtihondan yiqilib, nima qilsam bo'ladi?", expectIntent: "general_chat" },
+  { msg: "nima qilsam bo'ladi", expectIntent: "general_chat" },
+  { msg: "imtihondan yiqildim", expectIntent: "general_chat" },
   // Aniq tavsiya triggerlari hali ham recommendation (whitelist saqlanadi)
   { msg: "universitet tavsiya qil", expectIntent: "recommendation" },
   { msg: "qaysi universitetni tanlasam", expectIntent: "recommendation" },
