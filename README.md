@@ -2,6 +2,8 @@
 
 O'zbekiston talabalari uchun sun'iy intellektli universitet maslahatchisi — Mentalaba.uz ma'lumotlar bazasi (universitetlar, yo'nalishlar, grantlar, yangiliklar) ustida ishlaydigan konversatsion AI agent.
 
+> **📦 REPO TUZILMA (2026-08):** Bu repo — **BACKEND** (AI agent + API). Chat UI alohida repo'da: [`AzizbekAdxamov/ai_front`](https://github.com/AzizbekAdxamov/ai_front). Frontend `NEXT_PUBLIC_API_URL` env o'zgaruvchisi orqali shu backend'ga ulanadi; backend CORS orqali frontend domeniga ruxsat beradi (`CORS_ALLOWED_ORIGINS`).
+
 ## 🚀 Asosiy imkoniyatlar
 
 | Imkoniyat | Tavsif |
