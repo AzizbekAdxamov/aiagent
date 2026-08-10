@@ -362,7 +362,7 @@ class ProviderManager {
     sessionContext: any,
     conversationHistory: ChatMessage[],
     language: "uz" | "ru" | "en" = "uz"
-  ): Promise<{ content: string; intent?: string; toolUsed?: string; provider?: string }> {
+  ): Promise<{ content: string; intent?: string; toolUsed?: string; provider?: string; auth_required?: boolean }> {
     const startedAt = Date.now();
     let sessionId: string | undefined;
     if (sessionContext && typeof sessionContext === "object" && "id" in sessionContext) {
@@ -395,7 +395,7 @@ class ProviderManager {
     sessionContext: any,
     conversationHistory: ChatMessage[],
     language: "uz" | "ru" | "en" = "uz"
-  ): Promise<{ content: string; intent?: string; toolUsed?: string; provider?: string }> {
+  ): Promise<{ content: string; intent?: string; toolUsed?: string; provider?: string; auth_required?: boolean }> {
     // ✅ DEBUG LOGLAR - HAR BIR SO'ROVDA ISHLAYDI
     console.log("=".repeat(60));
     console.log("📝 [SESSION CONTEXT]:", JSON.stringify(sessionContext, null, 2));
@@ -595,6 +595,7 @@ class ProviderManager {
           // Frontend ChatMessage buni ushlab, LOGIN CTA kartasini ko'rsatadi
           // (oddiy matn o'rniga [ Kirish ] tugmasi bilan)
           toolUsed: "auth_required",
+          auth_required: true,
           provider: "template",
         };
       }
