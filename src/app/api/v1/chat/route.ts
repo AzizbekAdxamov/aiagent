@@ -387,6 +387,7 @@ export async function POST(request: NextRequest) {
         sessionId: session.id,
         intent: response.intent,
         toolUsed: response.toolUsed,
+        auth_required: (response as any).auth_required === true,
         suggestions: getSuggestions(response.intent || ""),
       },
     });
