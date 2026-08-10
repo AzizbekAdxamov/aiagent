@@ -30,12 +30,8 @@ export function greetingResponse(language: string): string {
 
 🏛 **Университеты** — государственные, частные и международные
 📚 **Направления** — IT, медицина, экономика, педагогика и 50+ других
-💰 **Гранты** — 100% гранты, стипендии
-📰 **Новости** — последние новости образования
 
-Какой у вас вопрос? Напишите, и я найду лучшие варианты для вас!
-
-👉 [Mentalaba.uz](https://mentalaba.uz)`;
+Какой у вас вопрос? Напишите, и я найду лучшие варианты для вас!`;
   }
   if (language === "en") {
     return `Hello! 😊 I'm **Mentalaba AI** — your assistant for students in Uzbekistan.
@@ -44,12 +40,8 @@ I can help you with:
 
 🏛 **Universities** — state, private, and international universities
 📚 **Programs** — IT, medicine, economics, pedagogy and 50+ more
-💰 **Grants** — 100% grants, scholarships, stipends
-📰 **News** — latest education news and announcements
 
-What would you like to know? Write your question and I'll find the best options for you!
-
-👉 [Mentalaba.uz](https://mentalaba.uz)`;
+What would you like to know? Write your question and I'll find the best options for you!`;
   }
   return `Assalomu alaykum! 😊 Men **Mentalaba AI** — O'zbekistondagi talabalar uchun yordamchi assistant.
 
@@ -57,12 +49,8 @@ Men sizga quyidagilarda yordam bera olaman:
 
 🏛 **Universitetlar** — davlat, xususiy va xalqaro universitetlar haqida to'liq ma'lumot
 📚 **Yo'nalishlar** — IT, tibbiyot, iqtisod, pedagogika va boshqa 50+ yo'nalish
-💰 **Grantlar** — 100% grant, davlat granti, stipendiyalar
-📰 **Yangiliklar** — so'nggi ta'lim yangiliklari va e'lonlar
 
-Qaysi yo'nalish sizni qiziqtiradi? Qayerda o'qimoqchisiz? Savolingizni yozing, men sizga eng yaxshi variantlarni topib beraman.
-
-👉 [Mentalaba.uz](https://mentalaba.uz) — barcha universitetlar katalogi`;
+Qaysi yo'nalish sizni qiziqtiradi? Qayerda o'qimoqchisiz? Savolingizni yozing, men sizga eng yaxshi variantlarni topib beraman.`;
 }
 
 /** API/tool xatosi (401, timeout) uchun aniq javob — "topilmadi" bilan adashtirmaslik uchun */
