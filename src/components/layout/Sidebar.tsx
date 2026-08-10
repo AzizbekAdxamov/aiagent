@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useChatStore } from "@/store/chat-store";
 import { cn } from "@/lib/cn";
+import { LoginPrompt } from "@/components/auth/LoginPrompt";
 import {
   MessageSquare,
   Plus,
@@ -28,6 +29,8 @@ export function Sidebar() {
     toggleTheme,
     setLanguage,
     deleteSession,
+    // GUEST REJIM: login qilmaganlar uchun tarix o'rniga login taklifi
+    authToken,
   } = useChatStore();
 
   // Item'lar faqat BIRINCHI yuklashda stagger animatsiya oladi
@@ -147,8 +150,18 @@ export function Sidebar() {
             </button>
           </div>
 
-          {/* Chat History */}
+          {/* Chat History — GUEST REJIM: login qilmaganlar uchun tarix o'rniga
+              login taklifi ko'rsatiladi (tarix saqlanmaydi). */}
           <div className="flex-1 overflow-y-auto custom-scrollbar px-3">
+            {!authToken ? (
+              <div className="pt-1 pb-3">
+                <LoginPrompt />
+                <p className="text-[11px] text-gray-400 dark:text-gray-500 text-center mt-3 px-2 leading-relaxed">
+                  Mehmon tarixi saqlanmaydi — joriy suhbat bu qurilmada davom etadi
+                </p>
+              </div>
+            ) : (
+              <>
             <div className="flex items-center justify-between px-2 mb-2">
               <div className="text-xs font-medium text-gray-400 dark:text-gray-500 uppercase tracking-wider whitespace-nowrap">
                 Suhbatlar tarixi
@@ -249,6 +262,8 @@ export function Sidebar() {
                   </div>
                 ))}
               </div>
+            )}
+              </>
             )}
           </div>
 

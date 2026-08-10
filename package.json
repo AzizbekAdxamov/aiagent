@@ -11,7 +11,8 @@
     "postinstall": "prisma generate",
     "db:generate": "prisma generate",
     "db:push": "prisma db push",
-    "db:seed": "prisma db seed"
+    "db:seed": "prisma db seed",
+    "cleanup:guests": "tsx scripts/cleanup-guest-sessions.ts"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"

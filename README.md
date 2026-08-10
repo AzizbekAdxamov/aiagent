@@ -60,7 +60,7 @@ GEMINI_MODEL=gemini-2.5-flash
 PORT=3000
 ```
 
-## 🔐 Mentalaba Auth (user login) — 2026-08
+## 🔐 Mentalaba Auth (user login + GUEST rejim) — 2026-08
 
 AI chat endi **mentalaba.uz auth tizimi** bilan birlashtirildi:
 
@@ -75,20 +75,36 @@ mentalaba.uz/auth?sign-in  →  login  →  AI chat
 - **Suhbatlar izolyatsiya qilingan** — har user faqat o'z session'larini ko'radi (`WHERE user_id = ...`)
 - Frontenddan kelgan `userId` ga ishonilmaydi — user id **token'dan** aniqlanadi
 
+### 🧑‍💻 GUEST REJIM (login qilmasdan ishlatish)
+
+Login qilmagan foydalanuvchi ham AI'ni bemalol ishlatadi — **401 qo'yilmaydi**:
+
+- Brauzer `mentalaba_guest_id` (UUID) yaratadi va `X-Guest-Id` header'ida yuboradi
+- Guest session'lari shu id bo'yicha izolyatsiya qilinadi (`WHERE guest_id = ...`)
+- **Guest tarixi saqlanmaydi** — ro'yxatda ko'rinmaydi, lekin joriy suhbat brauzerda davom etadi (refresh'da tiklanadi)
+- **Login qilganda guest session user'ga ulanadi** — shu paytdan boshlab tarix accountingizda saqlanadi
+
 ### Frontend token qanday topiladi?
 
 1. **URL parametr**: `?token=...&refreshToken=...` (mentalaba.uz redirect qilganda)
 2. **localStorage**: `accessToken` / `token` / `mentalaba_access_token` va boshqa kalitlar
 
-### LOKAL TEST (auth'siz ishlatish)
+### 🧹 GUEST MA'LUMOTLARNI TOZALASH (TTL)
 
-Production'da **majburiy login** (token yo'q bo'lsa 401). Lokal/test uchun:
+Guest session'lari suhbat davomiyligi uchun DB'da saqlanadi (tarixda ko'rinmaydi).
+Cheksiz o'smasligi uchun eski guest session'lar o'chiriladi:
 
-```env
-MENTALABA_AUTH_DISABLED=1
+```bash
+npm run cleanup:guests          # 30 kundan eski guest session'lar
+GUEST_TTL_DAYS=14 npm run cleanup:guests   # muddatni sozlash
 ```
 
-shunda chat auth'siz ishlaydi (mehmon rejimi).
+Login qilingan user'lar va claim qilingan session'larga tegilmaydi.
+
+### LOKAL TEST
+
+Auth'siz ham chat ishlaydi (guest rejim) — alohida sozlash shart emas. Faqat token'li
+foydalanuvchilar uchun validatsiya ishlaydi.
 ```
 
 ## 📋 Nima qilindi (asosiy o'zgarishlar)

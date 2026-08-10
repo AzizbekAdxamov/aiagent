@@ -19,16 +19,15 @@ interface ChatState {
   theme: "light" | "dark";
   sidebarOpen: boolean;
 
-  // ===== AUTH (BOSQICH 1) =====
+  // ===== AUTH (BOSQICH 1 + GUEST REJIM) =====
   authToken: string | null;
   refreshToken: string | null;
+  /** GUEST REJIM: login qilmagan foydalanuvchi brauzerda UUID yaratadi (X-Guest-Id) */
+  guestId: string | null;
   /** Auth tekshirilganmi (birinchi yuklashda login gate miltillamasligi uchun) */
   authChecked: boolean;
-  /** 401 qaytgan — login talab qilinadi */
-  authRequired: boolean;
   /** Sahifa yuklanganda token'larni topib, authChecked ni o'rnatadi */
   initAuth: () => void;
-  setAuthRequired: (required: boolean) => void;
   /** Chat API'ga yuboriladigan auth header'lari */
   authHeaders: () => Record<string, string>;
   /** 401 bo'lsa login gate'ga o'tkazadi */
@@ -63,6 +62,29 @@ const TOKEN_STORAGE_KEYS = [
   "mentalaba_token",
 ];
 const REFRESH_TOKEN_STORAGE_KEYS = ["refreshToken", "refresh_token", "mentalaba_refresh_token"];
+
+// ===== GUEST REJIM (BOSQICH 1 + GUEST) =====
+// Login qilmagan foydalanuvchi uchun brauzerda UUID yaratiladi va localStorage'da
+// saqlanadi. Shu guestId X-Guest-Id header'ida yuboriladi — session'lar shu id
+// bo'yicha izolyatsiya qilinadi. Oxirgi session id ham saqlanadi — refresh'da
+// joriy suhbat yo'qolmaydi (guest tarixi ro'yxatda ko'rinmaydi, lekin joriy
+// suhbat brauzerda davom etadi).
+const GUEST_ID_KEY = "mentalaba_guest_id";
+const LAST_SESSION_KEY = "mentalaba_last_session";
+
+function getOrCreateGuestId(): string | null {
+  if (typeof window === "undefined") return null;
+  try {
+    let id = localStorage.getItem(GUEST_ID_KEY);
+    if (!id || id.length < 10) {
+      id = `guest-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+      localStorage.setItem(GUEST_ID_KEY, id);
+    }
+    return id;
+  } catch (e) {
+    return null;
+  }
+}
 
 function readFromStorage(keys: string[]): string | null {
   if (typeof window === "undefined") return null;
@@ -138,11 +160,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
   // sinxronlanadi — mismatch bo'lmaydi.
   theme: "light",
   sidebarOpen: true,
-  // AUTH (BOSQICH 1)
+  // AUTH (BOSQICH 1 + GUEST REJIM)
   authToken: null,
   refreshToken: null,
+  guestId: null,
   authChecked: false,
-  authRequired: false,
   currentUniversity: null,
   currentDirection: null,
 
@@ -154,34 +176,61 @@ export const useChatStore = create<ChatState>((set, get) => ({
   // 2. authChecked = true — login gate'ni ko'rsatish/qo'ymaslikni hal qiladi
   initAuth: () => {
     const { token, refresh } = resolveAuthTokens();
+    const guestId = getOrCreateGuestId();
     set({
       authToken: token,
       refreshToken: refresh,
+      guestId,
       authChecked: true,
-      // Token bo'lmasa → login talab qilinadi (majburiy login)
-      authRequired: !token,
+      // GUEST REJIM: token bo'lmasa ham chat ishlaydi! Login qilmaganlar
+      // guestId bilan izolyatsiya qilinadi, lekin tarixi saqlanmaydi.
     });
+    // GUEST: oxirgi session'ni tiklash (refresh'da joriy suhbat yo'qolmasin)
+    if (!token && guestId && typeof window !== "undefined") {
+      try {
+        const lastSession = localStorage.getItem(LAST_SESSION_KEY);
+        if (lastSession) get().loadSession(lastSession);
+      } catch (e) {
+        /* ignore */
+      }
+    }
   },
 
-  setAuthRequired: (required) => {
-    if (required) set({ authRequired: true });
-  },
-
-  /** Barcha chat API so'rovlariga Authorization header qo'shadi */
+  /** Barcha chat API so'rovlariga Authorization + guest header'lar qo'shadi */
   authHeaders: () => {
-    const { authToken, refreshToken } = get();
+    const { authToken, refreshToken, guestId } = get();
     const headers: Record<string, string> = { "Content-Type": "application/json" };
     if (authToken) headers["Authorization"] = `Bearer ${authToken}`;
     if (refreshToken) headers["X-Refresh-Token"] = refreshToken;
+    if (guestId) headers["X-Guest-Id"] = guestId;
     return headers;
   },
 
-  /** 401 javobni tekshiradi — bo'lsa login gate'ga o'tadi */
+  /**
+   * 401 javobni tekshiradi. GUEST REJIM: 401 faqat token yaroqsiz/eskirganida
+   * keladi (guest'lar serverda 401 olmaydi). Token bo'lsa — tozalab, guest
+   * rejimga o'tamiz (chat davom etadi, login taklifi ko'rsatiladi).
+   * Return: true = chaqiruvchi to'xtashi kerak (yoki qayta urinishi).
+   */
   handleAuthResponse: (response: Response) => {
     if (response.status === 401) {
+      const hadToken = !!get().authToken;
       // Fix (reviewer): isLoading ni ham tozalash kerak — aks holda 401 dan
       // keyin qayta login qilganda input doim disabled bo'lib qoladi.
-      set({ authRequired: true, isLoading: false, isStreaming: false });
+      set({
+        authToken: null,
+        refreshToken: null,
+        isLoading: false,
+        isStreaming: false,
+      });
+      if (hadToken) {
+        try {
+          localStorage.removeItem("mentalaba_access_token");
+          localStorage.removeItem("mentalaba_refresh_token");
+        } catch (e) {
+          /* ignore */
+        }
+      }
       return true;
     }
     return false;
@@ -221,7 +270,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }));
 
     try {
-      const response = await fetch("/api/v1/chat", {
+      let response = await fetch("/api/v1/chat", {
         method: "POST",
         headers: get().authHeaders(),
         body: JSON.stringify({
@@ -231,7 +280,32 @@ export const useChatStore = create<ChatState>((set, get) => ({
         }),
       });
 
-      if (get().handleAuthResponse(response)) return;
+      // GUEST REJIM: 401 → token yaroqsiz/eskirgan — tozalab, guest sifatida
+      // qayta urinamiz (xabar yo'qolmasin). handleAuthResponse token'ni
+      // tozalaydi, authHeaders endi X-Guest-Id bilan qaytaradi.
+      if (response.status === 401) {
+        const hadToken = !!get().authToken;
+        get().handleAuthResponse(response);
+        if (hadToken) {
+          response = await fetch("/api/v1/chat", {
+            method: "POST",
+            headers: get().authHeaders(),
+            body: JSON.stringify({
+              message: content,
+              sessionId: state.currentSessionId,
+              language: state.language,
+            }),
+          });
+        }
+        if (response.status === 401) {
+          // Guest sifatida ham rad etildi (kutilmagan) — xatoni ko'rsatamiz,
+          // xabar indamay yo'qolib qolmasin.
+          set({
+            error: "Xizmat hozircha ishlamayapti — qayta urinib ko'ring.",
+          });
+          return;
+        }
+      }
 
       if (!response.ok) {
         throw new Error("Failed to send message");
@@ -254,6 +328,16 @@ export const useChatStore = create<ChatState>((set, get) => ({
         isLoading: false,
         error: null,
       }));
+
+      // GUEST: joriy session'ni eslab qolamiz — refresh'da suhbat tiklanadi
+      // (guest tarixi ro'yxatda ko'rinmaydi, lekin joriy suhbat davom etadi)
+      if (!get().authToken && typeof window !== "undefined") {
+        try {
+          localStorage.setItem(LAST_SESSION_KEY, result.data.sessionId);
+        } catch (e) {
+          /* ignore */
+        }
+      }
 
       // Refresh sessions list
       get().loadSessions();
@@ -330,6 +414,17 @@ export const useChatStore = create<ChatState>((set, get) => ({
           })),
           isLoading: false,
         });
+      } else {
+        // 404: session topilmadi (o'chirilgan yoki login'da claim qilingan) —
+        // eski last-session kalitini tozalaymiz, guest suhbatni yo'qotmaydi
+        set({ isLoading: false });
+        if (response.status === 404 && typeof window !== "undefined") {
+          try {
+            localStorage.removeItem(LAST_SESSION_KEY);
+          } catch (e) {
+            /* ignore */
+          }
+        }
       }
     } catch (error) {
       set({ isLoading: false });
@@ -344,6 +439,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
       currentDirection: null,
       error: null,
     });
+    // GUEST: "Yangi suhbat" bosilganda oxirgi session eslab qolinmasin
+    if (typeof window !== "undefined") {
+      try {
+        localStorage.removeItem(LAST_SESSION_KEY);
+      } catch (e) {
+        /* ignore */
+      }
+    }
   },
 
   clearError: () => set({ error: null }),

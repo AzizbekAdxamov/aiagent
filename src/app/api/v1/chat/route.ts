@@ -1,4 +1,4 @@
-﻿import { NextRequest, NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { llmService } from "@/ai-agent/llm-service";
 import { intentClassifier } from "@/ai-agent/intent-classifier";
 import { GENERIC_TOPIC_HEADING } from "@/ai-agent/direction-synonyms";
@@ -6,7 +6,7 @@ import { getSelfCompleteIntents } from "@/ai-agent/intent-config";
 import prisma from "@/lib/prisma";
 import { sanitizeText } from "@/lib/sanitize-text";
 import { apiAuthContext } from "@/lib/api-auth-context";
-import { getAuthUser, isAuthRequired, persistRefreshedUserTokens } from "@/lib/auth";
+import { getAuthUser, extractGuestId, persistRefreshedUserTokens } from "@/lib/auth";
 import type { ChatMessage, SessionContext } from "@/types";
 
 // request.url ishlatilgani uchun statik render qilinmaydi (DYNAMIC_SERVER_USAGE xatosini oldini oladi)
@@ -14,18 +14,26 @@ export const dynamic = "force-dynamic";
 // Vercel serverless funksiya limiti: standart 10s — AI + API chaqiruvlari uzoqroq davom etishi mumkin
 export const maxDuration = 60;
 
+/**
+ * Session egasini aniqlaydi: login qilgan user → userId (JWT'dan),
+ * login qilmagan (guest) → guestId (X-Guest-Id header). Ikkalasi ham
+ * yo'q bo'lsa — undefined (session faqat yangi ochiladi, izolyatsiyasiz).
+ */
+function ownerFilter(userId: number | null, guestId: string | null): Record<string, any> | undefined {
+  if (userId) return { userId };
+  if (guestId) return { guestId };
+  return undefined;
+}
+
 export async function POST(request: NextRequest) {
   try {
-    // ===== AUTH (BOSQICH 1) =====
-    // Majburiy login: Bearer token bo'lmasa → 401. User id TOKEN'DAN olinadi,
-    // frontenddan kelgan qiymatga ishonilmaydi.
+    // ===== AUTH (BOSQICH 1 + GUEST REJIM) =====
+    // Login qilgan user → userId (token'dan, frontendga ishonilmaydi).
+    // Login qilmagan (guest) → X-Guest-Id header orqali kelgan guestId bilan
+    // izolyatsiya qilinadi. GUEST REJIM: guest'lar ham AI ishlatadi — 401
+    // qo'yilmaydi, lekin ularning tarixi saqlanmaydi.
     const authUser = await getAuthUser(request);
-    if (isAuthRequired() && !authUser) {
-      return NextResponse.json(
-        { success: false, error: "Authentication required", code: "AUTH_REQUIRED" },
-        { status: 401 }
-      );
-    }
+    const guestId = extractGuestId(request);
     const userId = authUser?.userId ?? null;
 
     const body = await request.json();
@@ -38,13 +46,31 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Get or create session (faqat shu user'ning session'lariga kirish mumkin!)
+    // Get or create session (faqat shu user/guest'ning session'lariga kirish mumkin!)
+    // MUHIM (claim uchun): user ham, guestId ham kelganda avval user'ning o'z
+    // session'i, topilmasa — guest session qidiriladi (login'da claim qilinadi).
     let session;
     if (sessionId) {
-      session = await prisma.chatSession.findUnique({
-        where: { id: sessionId, ...(userId ? { userId } : {}) },
-        include: { messages: { orderBy: { createdAt: "asc" } } },
-      });
+      const withMessages = { messages: { orderBy: { createdAt: "asc" } } } as const;
+      if (userId) {
+        session = await prisma.chatSession.findFirst({
+          where: { id: sessionId, userId },
+          include: withMessages,
+        });
+        // GUEST → USER claim: user session'iga tegishli emas, lekin shu
+        // brauzerning guest session'i bo'lsa — claim uchun uni olamiz.
+        if (!session && guestId) {
+          session = await prisma.chatSession.findFirst({
+            where: { id: sessionId, guestId },
+            include: withMessages,
+          });
+        }
+      } else if (guestId) {
+        session = await prisma.chatSession.findFirst({
+          where: { id: sessionId, guestId },
+          include: withMessages,
+        });
+      }
     }
 
     if (!session) {
@@ -54,9 +80,21 @@ export async function POST(request: NextRequest) {
         data: {
           title: message.substring(0, 100),
           language,
-          userId,
+          ...(userId ? { userId } : guestId ? { guestId } : {}),
         },
         include: { messages: true },
+      });
+    }
+
+    // GUEST → USER (BOSQICH 1 + GUEST REJIM): login qilgan foydalanuvchi o'z
+    // guest session'ini davom ettirsa, session'ni accountinga biriktiramiz —
+    // shu paytdan boshlab tarix saqlanadi ("ularni datasi login qilmaguncha
+    // saqlanmaydi" qoidasi: login qilganda saqlana boshlaydi).
+    if (userId && guestId && session && !session.userId && session.guestId === guestId) {
+      session = await prisma.chatSession.update({
+        where: { id: session.id },
+        data: { userId, guestId: null },
+        include: { messages: { orderBy: { createdAt: "asc" } } },
       });
     }
 
@@ -103,6 +141,8 @@ export async function POST(request: NextRequest) {
     // Generate AI response (user tokeni kontekstida — Mentalaba API'ga user tokeni bilan murojaat qilinadi)
     // PER-USER TOKEN (BOSQICH 1): apiAuthContext ichida ishlaydi. API 401 qaytarsa,
     // user refresh tokeni bilan yangilanib, onTokenRefreshed orqali DB'ga yoziladi.
+    // GUEST REJIM: login qilmaganlar uchun kontekst bo'sh bo'ladi — external-api
+    // shunda o'z default (global) tokenidan foydalanadi.
     const response = await apiAuthContext.run(
       {
         accessToken: authUser?.accessToken || "",
@@ -323,8 +363,8 @@ export async function POST(request: NextRequest) {
       // Agar eski topic nomi bo'lmasa, uni o'rnatmaymiz
     }
     // currentTopicName ni saqlash
-    // Agar oldingi topic nomi bor bo'lsa va yangisi topilmasa â†’ eskisini saqlaymiz
-    // Agar yangisi topilsa â†’ yangisini ishlatamiz
+    // Agar oldingi topic nomi bor bo'lsa va yangisi topilmasa → eskisini saqlaymiz
+    // Agar yangisi topilsa → yangisini ishlatamiz
 
     // Update session with topic name in metadata
     await prisma.chatSession.update({
@@ -358,29 +398,27 @@ export async function POST(request: NextRequest) {
 
 export async function GET(request: NextRequest) {
   try {
-    // ===== AUTH (BOSQICH 1) =====
+    // ===== AUTH (BOSQICH 1 + GUEST REJIM) =====
     const authUser = await getAuthUser(request);
-    if (isAuthRequired() && !authUser) {
-      return NextResponse.json(
-        { success: false, error: "Authentication required", code: "AUTH_REQUIRED" },
-        { status: 401 }
-      );
-    }
+    const guestId = extractGuestId(request);
     const userId = authUser?.userId ?? null;
 
     const { searchParams } = new URL(request.url);
     const sessionId = searchParams.get("sessionId");
 
     if (sessionId) {
-      const session = await prisma.chatSession.findUnique({
-        where: { id: sessionId, ...(userId ? { userId } : {}) },
-        include: {
-          messages: {
-            orderBy: { createdAt: "asc" },
-            take: 50,
-          },
-        },
-      });
+      const owner = ownerFilter(userId, guestId);
+      const session = owner
+        ? await prisma.chatSession.findFirst({
+            where: { id: sessionId, ...owner },
+            include: {
+              messages: {
+                orderBy: { createdAt: "asc" },
+                take: 50,
+              },
+            },
+          })
+        : null;
 
       if (!session) {
         return NextResponse.json(
@@ -398,9 +436,15 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    // Return all sessions — faqat SHU USER'ning session'lari!
+    // Sessionlar ro'yxati: FAQAT login qilgan userlar uchun!
+    // GUEST REJIM: guest'lar tarixi saqlanmaydi — ularga bo'sh ro'yxat qaytadi
+    // (joriy suhbat brauzerda guestId orqali davom etadi).
+    if (!userId) {
+      return NextResponse.json({ success: true, data: [] });
+    }
+
     const sessions = await prisma.chatSession.findMany({
-      where: userId ? { userId } : {},
+      where: { userId },
       orderBy: { updatedAt: "desc" },
       take: 20,
       select: {
@@ -423,14 +467,9 @@ export async function GET(request: NextRequest) {
 
 export async function DELETE(request: NextRequest) {
   try {
-    // ===== AUTH (BOSQICH 1) =====
+    // ===== AUTH (BOSQICH 1 + GUEST REJIM) =====
     const authUser = await getAuthUser(request);
-    if (isAuthRequired() && !authUser) {
-      return NextResponse.json(
-        { success: false, error: "Authentication required", code: "AUTH_REQUIRED" },
-        { status: 401 }
-      );
-    }
+    const guestId = extractGuestId(request);
     const userId = authUser?.userId ?? null;
 
     const { searchParams } = new URL(request.url);
@@ -443,9 +482,10 @@ export async function DELETE(request: NextRequest) {
       );
     }
 
-    const session = await prisma.chatSession.findUnique({
-      where: { id: sessionId, ...(userId ? { userId } : {}) },
-    });
+    const owner = ownerFilter(userId, guestId);
+    const session = owner
+      ? await prisma.chatSession.findFirst({ where: { id: sessionId, ...owner } })
+      : null;
     if (!session) {
       return NextResponse.json(
         { success: false, error: "Session not found" },
@@ -535,4 +575,3 @@ function getSuggestions(intent: string): string[] {
       ];
   }
 }
-

@@ -216,6 +216,9 @@ model MentalabaUser {
 model ChatSession {
   id            String   @id @default(cuid())
   userId        Int?     @map("user_id")
+  // GUEST REJIM: login qilmagan foydalanuvchi brauzerda UUID yaratadi
+  // (localStorage), shu id bilan session'lar izolyatsiya qilinadi.
+  guestId       String?  @map("guest_id")
   title         String?
   language      String   @default("uz")
   currentUniversityId Int? @map("current_university_id")
@@ -228,6 +231,7 @@ model ChatSession {
   messages ChatMessage[]
 
   @@index([userId])
+  @@index([guestId])
   @@map("chat_sessions")
 }
 

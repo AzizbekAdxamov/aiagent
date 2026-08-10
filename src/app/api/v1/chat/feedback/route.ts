@@ -1,17 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
-import { getAuthUser, isAuthRequired } from "@/lib/auth";
+import { getAuthUser, extractGuestId } from "@/lib/auth";
 
 export async function POST(request: NextRequest) {
   try {
-    // ===== AUTH (BOSQICH 1) =====
+    // ===== AUTH (BOSQICH 1 + GUEST REJIM) =====
+    // Login qilgan → userId; login qilmagan (guest) → guestId. Ikkalasi ham
+    // feedback bera oladi, lekin faqat O'Z session'iga (izolyatsiya).
     const authUser = await getAuthUser(request);
-    if (isAuthRequired() && !authUser) {
-      return NextResponse.json(
-        { success: false, error: "Authentication required", code: "AUTH_REQUIRED" },
-        { status: 401 }
-      );
-    }
+    const guestId = extractGuestId(request);
     const userId = authUser?.userId ?? null;
 
     const body = await request.json();
@@ -29,8 +26,8 @@ export async function POST(request: NextRequest) {
         id: messageId,
         sessionId,
         role: "assistant",
-        // User faqat O'Z session'iga feedback bera oladi
-        session: userId ? { userId } : undefined,
+        // User/guest faqat O'Z session'iga feedback bera oladi
+        session: userId ? { userId } : guestId ? { guestId } : undefined,
       },
       select: { id: true },
     });

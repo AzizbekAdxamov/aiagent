@@ -15,11 +15,6 @@ import prisma from "@/lib/prisma";
 
 const API_URL = process.env.MENTALABA_API_URL || "https://api.mentalaba.uz/v1";
 
-// Lokal ishlab chiqish/test uchun auth'ni o'chirish (production'da YO'Q bo'lishi kerak!)
-const AUTH_DISABLED = ["1", "true", "yes", "off"].includes(
-  (process.env.MENTALABA_AUTH_DISABLED || "").toLowerCase()
-);
-
 export interface AuthUser {
   userId: number; // Mentalaba user id (JWT payload: id)
   accessToken: string;
@@ -56,6 +51,17 @@ export function extractBearerToken(request: Request): string | null {
  */
 export function extractRefreshToken(request: Request): string | null {
   const header = request.headers.get("x-refresh-token") || "";
+  return header.trim() || null;
+}
+
+/**
+ * GUEST REJIM: request'dan guest ID'ni ajratib oladi (X-Guest-Id header).
+ * Login qilmagan foydalanuvchi brauzerda UUID yaratadi (localStorage) va uni
+ * shu header'da yuboradi — session'lar guest ID bo'yicha izolyatsiya qilinadi.
+ * Guest'lar tarixi saqlanmaydi; login qilganda guest session user'ga ulanadi.
+ */
+export function extractGuestId(request: Request): string | null {
+  const header = request.headers.get("x-guest-id") || "";
   return header.trim() || null;
 }
 
@@ -144,8 +150,19 @@ export async function getAuthUser(request: Request): Promise<AuthUser | null> {
         return null;
       }
       const apiUserId = Number(profile?.id ?? profile?.user?.id);
-      if (!apiUserId || !Number.isFinite(apiUserId) || apiUserId !== userId) {
-        console.warn(`[Auth] User id mos emas: JWT=${userId}, API=${apiUserId}`);
+      // DIQQAT (production test): /v1/users/profile javobida `id` YO'Q — faqat
+      // { first_name, phone, ... }. Shuning uchun id bo'lmasa phone bilan
+      // solishtiriladi (JWT'da ham phone bor) — xuddi yangi user branch'idagi kabi.
+      const profilePhone = String(profile?.phone ?? profile?.user?.phone ?? "");
+      const jwtPhone = String(payload?.phone ?? "");
+      const idMatch = apiUserId && Number.isFinite(apiUserId) && apiUserId === userId;
+      const phoneMatch =
+        !apiUserId &&
+        jwtPhone &&
+        profilePhone &&
+        jwtPhone.replace(/\D/g, "") === profilePhone.replace(/\D/g, "");
+      if (!idMatch && !phoneMatch) {
+        console.warn(`[Auth] User id mos emas: JWT=${userId}, API=${apiUserId || profilePhone || "?"}`);
         return null;
       }
       // Yangi qurilma tokeni tasdiqlandi → DB'ga yangi token yoziladi (keyingi tekshiruv tez)
@@ -243,11 +260,6 @@ export async function validateTokenWithApi(token: string): Promise<any | null> {
     console.error("[Auth Validate Error]", (error as Error).message);
     return null;
   }
-}
-
-/** Auth talab qilinadimi (AUTH_DISABLED bo'lmasa) */
-export function isAuthRequired(): boolean {
-  return !AUTH_DISABLED;
 }
 
 /**

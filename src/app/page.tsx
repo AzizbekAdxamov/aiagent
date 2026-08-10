@@ -3,13 +3,12 @@
 import { Sidebar } from "@/components/layout/Sidebar";
 import { ChatMessages } from "@/components/chat/ChatMessages";
 import { ChatInput } from "@/components/chat/ChatInput";
-import { LoginGate } from "@/components/auth/LoginGate";
 import { useEffect } from "react";
 import { useChatStore } from "@/store/chat-store";
 import { Menu, Sun, Moon } from "lucide-react";
 
 export default function Home() {
-  const { toggleSidebar, toggleTheme, theme, setTheme, initAuth, authChecked, authRequired } =
+  const { toggleSidebar, toggleTheme, theme, setTheme, initAuth } =
     useChatStore();
 
   // Haqiqiy rejimni DOM'dan sinxronlash — SSR hydration mismatch oldini oladi
@@ -65,18 +64,16 @@ export default function Home() {
           </button>
         </div>
 
-        {/* AUTH GATE (BOSQICH 1): login qilinmagan bo'lsa — chat o'rniga kirish ekrani */}
-        {authChecked && authRequired ? (
-          <LoginGate />
-        ) : (
-          <>
-            {/* Chat Messages */}
-            <ChatMessages />
+        {/* GUEST REJIM (BOSQICH 1 + GUEST): login qilinmagan bo'lsa ham chat
+            ishlaydi — guestId bilan izolyatsiya, tarix saqlanmaydi. Login
+            taklifi Sidebar'da ko'rsatiladi. */}
+        <>
+          {/* Chat Messages */}
+          <ChatMessages />
 
-            {/* Chat Input */}
-            <ChatInput />
-          </>
-        )}
+          {/* Chat Input */}
+          <ChatInput />
+        </>
       </div>
     </div>
   );
