@@ -15,6 +15,8 @@
 import iconv from 'iconv-lite';
 import { readFileSync, writeFileSync } from "fs";
 import { join } from "path";
+import { apiAuthContext } from "./api-auth-context";
+import { refreshUserTokens } from "./auth";
 
 const BASE_URL = process.env.MENTALABA_API_URL || "https://api.mentalaba.uz/v1";
 // .env fayli proyekt ildizida (npm run dev shu yerdan ishga tushadi)
@@ -173,8 +175,12 @@ class ExternalAPI {
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
     };
-    if (this.accessToken) {
-      headers["Authorization"] = `Bearer ${this.accessToken}`;
+    // PER-USER TOKEN (BOSQICH 1): so'rov kontekstida user tokeni bo'lsa —
+    // global .env tokeni o'rniga USER tokeni ishlatiladi.
+    const userCtx = apiAuthContext.getStore();
+    const token = userCtx?.accessToken || this.accessToken;
+    if (token) {
+      headers["Authorization"] = `Bearer ${token}`;
     }
     return headers;
   }
@@ -190,15 +196,39 @@ class ExternalAPI {
     });
 
     // 401 xatosi bo'lsa, tokenni yangilab qayta urinish
-    if (response.status === 401 && this.refreshTokenValue) {
-      await this.refreshAccessToken();
-      response = await fetch(url, {
-        ...options,
-        headers: {
-          ...this.getHeaders(),
-          ...options?.headers,
-        },
-      });
+    if (response.status === 401) {
+      const userCtx = apiAuthContext.getStore();
+      if (userCtx?.accessToken && userCtx.refreshToken) {
+        // PER-USER TOKEN (BOSQICH 1): user tokeni eskirgan → user refresh
+        // tokeni bilan yangilaymiz va DB'ga yozamiz (onTokenRefreshed).
+        const refreshed = await refreshUserTokens(userCtx.refreshToken);
+        if (refreshed) {
+          userCtx.accessToken = refreshed.accessToken;
+          if (refreshed.refreshToken) userCtx.refreshToken = refreshed.refreshToken;
+          try {
+            userCtx.onTokenRefreshed?.(refreshed.accessToken, refreshed.refreshToken);
+          } catch (e) {
+            console.warn("[Token Persist Warn]", (e as Error).message);
+          }
+          response = await fetch(url, {
+            ...options,
+            headers: {
+              ...this.getHeaders(),
+              ...options?.headers,
+            },
+          });
+        }
+      } else if (this.refreshTokenValue) {
+        // Global (admin) token — eski mexanizm
+        await this.refreshAccessToken();
+        response = await fetch(url, {
+          ...options,
+          headers: {
+            ...this.getHeaders(),
+            ...options?.headers,
+          },
+        });
+      }
     }
 
     if (!response.ok) {

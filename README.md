@@ -60,6 +60,37 @@ GEMINI_MODEL=gemini-2.5-flash
 PORT=3000
 ```
 
+## 🔐 Mentalaba Auth (user login) — 2026-08
+
+AI chat endi **mentalaba.uz auth tizimi** bilan birlashtirildi:
+
+```
+mentalaba.uz/auth?sign-in  →  login  →  AI chat
+```
+
+- User mentalaba.uz saytida login qiladi, **alohida AI login yo'q**
+- Frontend token'ni `Authorization: Bearer <token>` header orqali chat API'ga yuboradi
+- **Har user o'z tokeni** bilan Mentalaba API'ga murojaat qiladi (global .env tokeni EMAS)
+- Token muddati o'tsa — `/v1/auth/refresh` orqali **avtomatik yangilanadi** (DB'da saqlanadi)
+- **Suhbatlar izolyatsiya qilingan** — har user faqat o'z session'larini ko'radi (`WHERE user_id = ...`)
+- Frontenddan kelgan `userId` ga ishonilmaydi — user id **token'dan** aniqlanadi
+
+### Frontend token qanday topiladi?
+
+1. **URL parametr**: `?token=...&refreshToken=...` (mentalaba.uz redirect qilganda)
+2. **localStorage**: `accessToken` / `token` / `mentalaba_access_token` va boshqa kalitlar
+
+### LOKAL TEST (auth'siz ishlatish)
+
+Production'da **majburiy login** (token yo'q bo'lsa 401). Lokal/test uchun:
+
+```env
+MENTALABA_AUTH_DISABLED=1
+```
+
+shunda chat auth'siz ishlaydi (mehmon rejimi).
+```
+
 ## 📋 Nima qilindi (asosiy o'zgarishlar)
 
 1. **Intent Classifier** — 15+ intent, sinonimlar (meditsina→tibbiyot, vrach→tibbiyot), xato yozilgan so'zlarni normalizatsiya, `tavsiya qilingan` kabi o'tgan zamon shakllarini to'g'ri ajratish

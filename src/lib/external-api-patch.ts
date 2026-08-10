@@ -1,5 +1,7 @@
 import iconv from 'iconv-lite';
 import { externalApi } from './external-api';
+import { apiAuthContext } from './api-auth-context';
+import { refreshUserTokens } from './auth';
 
 // Patch the exported externalApi instance to provide robust decoding and proper Authorization header
 // This avoids editing the original file directly and lets the rest of the code continue importing from the original module.
@@ -10,7 +12,9 @@ function patchedGetHeaders(): Record<string, string> {
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
   };
-  const token = apiAny.accessToken || '';
+  // PER-USER TOKEN (BOSQICH 1): user konteksti bo'lsa — user tokeni ishlatiladi
+  const userCtx = apiAuthContext.getStore();
+  const token = userCtx?.accessToken || apiAny.accessToken || '';
   if (token) headers['Authorization'] = `Bearer ${token}`;
   return headers;
 }
@@ -27,20 +31,42 @@ async function patchedRequest(endpoint: string, options?: RequestInit): Promise<
     },
   });
 
-  if (response.status === 401 && (apiAny.refreshTokenValue || apiAny.refreshToken)) {
-    // Attempt to call existing refresh if present
-    try {
-      if (typeof apiAny.refreshAccessToken === 'function') await apiAny.refreshAccessToken();
-    } catch (e) {
-      // ignore
+  if (response.status === 401) {
+    const userCtx = apiAuthContext.getStore();
+    if (userCtx?.accessToken && userCtx.refreshToken) {
+      // PER-USER TOKEN (BOSQICH 1): user tokeni eskirgan → user refresh bilan yangilanadi
+      const refreshed = await refreshUserTokens(userCtx.refreshToken);
+      if (refreshed) {
+        userCtx.accessToken = refreshed.accessToken;
+        if (refreshed.refreshToken) userCtx.refreshToken = refreshed.refreshToken;
+        try {
+          userCtx.onTokenRefreshed?.(refreshed.accessToken, refreshed.refreshToken);
+        } catch (e) {
+          console.warn('[Token Persist Warn]', (e as Error).message);
+        }
+        response = await fetch(url, {
+          ...options,
+          headers: {
+            ...patchedGetHeaders(),
+            ...options?.headers,
+          },
+        });
+      }
+    } else if (apiAny.refreshTokenValue || apiAny.refreshToken) {
+      // Global (admin) token — eski mexanizm
+      try {
+        if (typeof apiAny.refreshAccessToken === 'function') await apiAny.refreshAccessToken();
+      } catch (e) {
+        // ignore
+      }
+      response = await fetch(url, {
+        ...options,
+        headers: {
+          ...patchedGetHeaders(),
+          ...options?.headers,
+        },
+      });
     }
-    response = await fetch(url, {
-      ...options,
-      headers: {
-        ...patchedGetHeaders(),
-        ...options?.headers,
-      },
-    });
   }
 
   if (!response.ok) {

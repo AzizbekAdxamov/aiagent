@@ -3,12 +3,14 @@
 import { Sidebar } from "@/components/layout/Sidebar";
 import { ChatMessages } from "@/components/chat/ChatMessages";
 import { ChatInput } from "@/components/chat/ChatInput";
+import { LoginGate } from "@/components/auth/LoginGate";
 import { useEffect } from "react";
 import { useChatStore } from "@/store/chat-store";
 import { Menu, Sun, Moon } from "lucide-react";
 
 export default function Home() {
-  const { toggleSidebar, toggleTheme, theme, setTheme } = useChatStore();
+  const { toggleSidebar, toggleTheme, theme, setTheme, initAuth, authChecked, authRequired } =
+    useChatStore();
 
   // Haqiqiy rejimni DOM'dan sinxronlash — SSR hydration mismatch oldini oladi
   // (layout skripti <html> ga dark class qo'shgan bo'ladi)
@@ -16,6 +18,12 @@ export default function Home() {
     setTheme(
       document.documentElement.classList.contains("dark") ? "dark" : "light"
     );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // AUTH (BOSQICH 1): token'ni URL/localStorage'dan o'qib, auth holatini o'rnatadi
+  useEffect(() => {
+    initAuth();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -57,11 +65,18 @@ export default function Home() {
           </button>
         </div>
 
-        {/* Chat Messages */}
-        <ChatMessages />
+        {/* AUTH GATE (BOSQICH 1): login qilinmagan bo'lsa — chat o'rniga kirish ekrani */}
+        {authChecked && authRequired ? (
+          <LoginGate />
+        ) : (
+          <>
+            {/* Chat Messages */}
+            <ChatMessages />
 
-        {/* Chat Input */}
-        <ChatInput />
+            {/* Chat Input */}
+            <ChatInput />
+          </>
+        )}
       </div>
     </div>
   );

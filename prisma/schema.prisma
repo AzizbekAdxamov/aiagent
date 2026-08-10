@@ -195,9 +195,27 @@ model UniversityDirection {
   @@map("university_directions")
 }
 
+// ======================================================================
+// MENTALABA AUTH (BOSQICH 1): har bir foydalanuvchi o'z tokenlari bilan
+// chat'ga kiradi. userId = Mentalaba API'dagi user id (JWT payload: id).
+// Tokenlar DB'da saqlanadi — /v1/auth/refresh orqali avtomatik yangilanadi.
+// ======================================================================
+model MentalabaUser {
+  id             Int       @id // Mentalaba API user id (JWT payload id)
+  accessToken    String    @map("access_token")
+  refreshToken   String?   @map("refresh_token")
+  tokenExpiresAt DateTime? @map("token_expires_at")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+
+  sessions ChatSession[]
+
+  @@map("mentalaba_users")
+}
+
 model ChatSession {
   id            String   @id @default(cuid())
-  userId        String?  @map("user_id")
+  userId        Int?     @map("user_id")
   title         String?
   language      String   @default("uz")
   currentUniversityId Int? @map("current_university_id")
@@ -206,8 +224,10 @@ model ChatSession {
   createdAt     DateTime @default(now()) @map("created_at")
   updatedAt     DateTime @updatedAt @map("updated_at")
 
+  user     MentalabaUser? @relation(fields: [userId], references: [id])
   messages ChatMessage[]
 
+  @@index([userId])
   @@map("chat_sessions")
 }
 

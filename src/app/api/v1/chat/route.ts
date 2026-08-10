@@ -5,6 +5,8 @@ import { GENERIC_TOPIC_HEADING } from "@/ai-agent/direction-synonyms";
 import { getSelfCompleteIntents } from "@/ai-agent/intent-config";
 import prisma from "@/lib/prisma";
 import { sanitizeText } from "@/lib/sanitize-text";
+import { apiAuthContext } from "@/lib/api-auth-context";
+import { getAuthUser, isAuthRequired, persistRefreshedUserTokens } from "@/lib/auth";
 import type { ChatMessage, SessionContext } from "@/types";
 
 // request.url ishlatilgani uchun statik render qilinmaydi (DYNAMIC_SERVER_USAGE xatosini oldini oladi)
@@ -14,6 +16,18 @@ export const maxDuration = 60;
 
 export async function POST(request: NextRequest) {
   try {
+    // ===== AUTH (BOSQICH 1) =====
+    // Majburiy login: Bearer token bo'lmasa → 401. User id TOKEN'DAN olinadi,
+    // frontenddan kelgan qiymatga ishonilmaydi.
+    const authUser = await getAuthUser(request);
+    if (isAuthRequired() && !authUser) {
+      return NextResponse.json(
+        { success: false, error: "Authentication required", code: "AUTH_REQUIRED" },
+        { status: 401 }
+      );
+    }
+    const userId = authUser?.userId ?? null;
+
     const body = await request.json();
     const { message, sessionId, language = "uz" } = body;
 
@@ -24,11 +38,11 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Get or create session
+    // Get or create session (faqat shu user'ning session'lariga kirish mumkin!)
     let session;
     if (sessionId) {
       session = await prisma.chatSession.findUnique({
-        where: { id: sessionId },
+        where: { id: sessionId, ...(userId ? { userId } : {}) },
         include: { messages: { orderBy: { createdAt: "asc" } } },
       });
     }
@@ -40,6 +54,7 @@ export async function POST(request: NextRequest) {
         data: {
           title: message.substring(0, 100),
           language,
+          userId,
         },
         include: { messages: true },
       });
@@ -85,12 +100,24 @@ export async function POST(request: NextRequest) {
       timestamp: m.createdAt,
     }));
 
-    // Generate AI response
-    const response = await llmService.generateResponse(
-      message,
-      sessionContext,
-      conversationHistory,
-      language
+    // Generate AI response (user tokeni kontekstida — Mentalaba API'ga user tokeni bilan murojaat qilinadi)
+    // PER-USER TOKEN (BOSQICH 1): apiAuthContext ichida ishlaydi. API 401 qaytarsa,
+    // user refresh tokeni bilan yangilanib, onTokenRefreshed orqali DB'ga yoziladi.
+    const response = await apiAuthContext.run(
+      {
+        accessToken: authUser?.accessToken || "",
+        refreshToken: authUser?.refreshToken || undefined,
+        onTokenRefreshed: (access, refresh) => {
+          if (authUser) void persistRefreshedUserTokens(authUser.userId, access, refresh);
+        },
+      },
+      () =>
+        llmService.generateResponse(
+          message,
+          sessionContext,
+          conversationHistory,
+          language
+        )
     );
 
     // Save and sanitize AI response
@@ -331,12 +358,22 @@ export async function POST(request: NextRequest) {
 
 export async function GET(request: NextRequest) {
   try {
+    // ===== AUTH (BOSQICH 1) =====
+    const authUser = await getAuthUser(request);
+    if (isAuthRequired() && !authUser) {
+      return NextResponse.json(
+        { success: false, error: "Authentication required", code: "AUTH_REQUIRED" },
+        { status: 401 }
+      );
+    }
+    const userId = authUser?.userId ?? null;
+
     const { searchParams } = new URL(request.url);
     const sessionId = searchParams.get("sessionId");
 
     if (sessionId) {
       const session = await prisma.chatSession.findUnique({
-        where: { id: sessionId },
+        where: { id: sessionId, ...(userId ? { userId } : {}) },
         include: {
           messages: {
             orderBy: { createdAt: "asc" },
@@ -361,8 +398,9 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    // Return all sessions
+    // Return all sessions — faqat SHU USER'ning session'lari!
     const sessions = await prisma.chatSession.findMany({
+      where: userId ? { userId } : {},
       orderBy: { updatedAt: "desc" },
       take: 20,
       select: {
@@ -385,6 +423,16 @@ export async function GET(request: NextRequest) {
 
 export async function DELETE(request: NextRequest) {
   try {
+    // ===== AUTH (BOSQICH 1) =====
+    const authUser = await getAuthUser(request);
+    if (isAuthRequired() && !authUser) {
+      return NextResponse.json(
+        { success: false, error: "Authentication required", code: "AUTH_REQUIRED" },
+        { status: 401 }
+      );
+    }
+    const userId = authUser?.userId ?? null;
+
     const { searchParams } = new URL(request.url);
     const sessionId = searchParams.get("sessionId");
 
@@ -396,7 +444,7 @@ export async function DELETE(request: NextRequest) {
     }
 
     const session = await prisma.chatSession.findUnique({
-      where: { id: sessionId },
+      where: { id: sessionId, ...(userId ? { userId } : {}) },
     });
     if (!session) {
       return NextResponse.json(

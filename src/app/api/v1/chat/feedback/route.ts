@@ -1,8 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
+import { getAuthUser, isAuthRequired } from "@/lib/auth";
 
 export async function POST(request: NextRequest) {
   try {
+    // ===== AUTH (BOSQICH 1) =====
+    const authUser = await getAuthUser(request);
+    if (isAuthRequired() && !authUser) {
+      return NextResponse.json(
+        { success: false, error: "Authentication required", code: "AUTH_REQUIRED" },
+        { status: 401 }
+      );
+    }
+    const userId = authUser?.userId ?? null;
+
     const body = await request.json();
     const { messageId, sessionId, rating, comment } = body;
 
@@ -18,6 +29,8 @@ export async function POST(request: NextRequest) {
         id: messageId,
         sessionId,
         role: "assistant",
+        // User faqat O'Z session'iga feedback bera oladi
+        session: userId ? { userId } : undefined,
       },
       select: { id: true },
     });
