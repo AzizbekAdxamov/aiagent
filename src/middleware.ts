@@ -46,6 +46,7 @@ export function middleware(request: NextRequest) {
         "Access-Control-Allow-Headers":
           "Content-Type, Authorization, X-Refresh-Token, X-Guest-Id",
         "Access-Control-Max-Age": "86400",
+        "Vary": "Origin",
       },
     });
   }
@@ -61,6 +62,9 @@ export function middleware(request: NextRequest) {
       "Access-Control-Allow-Headers",
       "Content-Type, Authorization, X-Refresh-Token, X-Guest-Id"
     );
+    // Origin'ga qarab o'zgaruvchi header — CDN/cache noto'g'ri CORS
+    // yozmasligi uchun Vary: Origin majburiy
+    response.headers.set("Vary", "Origin");
   }
   return response;
 }
