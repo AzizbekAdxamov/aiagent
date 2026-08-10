@@ -160,15 +160,27 @@ export async function getAuthUser(request: Request): Promise<AuthUser | null> {
     refreshToken = headerRefresh;
     // JWT payload'ini soxtalashtirish mumkinligi uchun (signature secret
     // bizda yo'q) — tokenni Mentalaba API orqali validatsiya qilamiz.
+    // DIQQAT (production test): /v1/users/profile javobida `id` YO'Q —
+    // faqat { first_name, phone, email, ... } qaytadi. Shuning uchun
+    // id bo'lmasa phone bilan solishtiriladi (JWT'da ham phone bor).
     const profile = await validateTokenWithApi(token);
     if (!profile) {
       console.warn(`[Auth] Yangi user ${userId} tokeni API validatsiyadan o'tmadi — soxta token`);
       return null;
     }
-    // API qaytgan user id bilan JWT'dagi id mos kelishi shart!
     const apiUserId = Number(profile?.id ?? profile?.user?.id);
-    if (!apiUserId || !Number.isFinite(apiUserId) || apiUserId !== userId) {
+    const profilePhone = String(profile?.phone ?? profile?.user?.phone ?? "");
+    const jwtPhone = String(payload?.phone ?? "");
+    // id bor bo'lsa — id bilan; id bo'lmasa — phone bilan tekshiramiz
+    if (apiUserId && Number.isFinite(apiUserId) && apiUserId !== userId) {
       console.warn(`[Auth] User id mos emas: JWT=${userId}, API=${apiUserId}`);
+      return null;
+    }
+    if (
+      !apiUserId &&
+      (!jwtPhone || !profilePhone || jwtPhone.replace(/\D/g, "") !== profilePhone.replace(/\D/g, ""))
+    ) {
+      console.warn(`[Auth] User phone mos emas: JWT=${jwtPhone}, API=${profilePhone}`);
       return null;
     }
   }
