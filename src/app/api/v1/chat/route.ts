@@ -218,7 +218,7 @@ export async function POST(request: NextRequest) {
       metadataUpdate.interestGrant = true;
     }
 
-    // ===== RECOMMENDATION PROFILE (BOSQICH 9) =====
+    // ===== RECOMMENDATION PROFILE (BOSQICH 9 + STAGE 14c fix) =====
     // Session bo'ylab foydalanuvchi profili to'planadi (JARVIS usuli):
     //   "Matematikam yaxshi" → strengths:["matematika"]
     //   "Pulim kam"         → budgetLevel:"low"
@@ -226,8 +226,16 @@ export async function POST(request: NextRequest) {
     //   "Ingliz tilim C1"   → language:"english"
     //   "Magistratura"      → degree:"master"
     // Har bir yangi so'rovda yangi ma'lumotlar qo'shilib boradi.
+    //
+    // STAGE 14c FIX (MUHIM): profil manbasi sifatida metadataUpdate emas,
+    // sessionContext.recommendationProfile olinadi — chunki provider-manager
+    // updateRecommendationProfile orqali admissionFailed/wantsToStudy kabi
+    // flag'larni SHU obyektga yozadi (metadatadagi eski reference'ga emas).
+    // Aks holda "imtihondan yiqildim" flag'i har so'rovda yo'qolib, keyingi
+    // tavsiyalar xususiy-first bo'lmay qolardi (STAGE 14 user holati umuman
+    // state'ga tushmasdi).
     const profile: NonNullable<SessionContext["recommendationProfile"]> =
-      metadataUpdate.recommendationProfile ?? {};
+      sessionContext.recommendationProfile ?? metadataUpdate.recommendationProfile ?? {};
     const addToArray = (key: "interests" | "strengths" | "weaknesses", value?: string) => {
       if (!value) return;
       const arr = (profile[key] = profile[key] || []);
@@ -272,11 +280,13 @@ export async function POST(request: NextRequest) {
       profile.budgetLevel = "high";
     }
     // Shahar: region entity'dan profil city
-    if (entities.region && metadataUpdate.currentRegion) {
-      // Region ID'ni nomga aylantirish chat route'da lookup yo'q — city o'rniga
-      // metadataUpdate.currentRegion (ID) saqlanadi; profil city ko'rsatish uchun
-      // entity extractor'dagi region nomini saqlash qiyin — shuning uchun
-      // region ID profilga ham yoziladi (tool-router uni o'qiydi).
+    // REVIEWER FIX (STAGE 14c): city'ni RAW region ID bilan YOZIB TASHLAMAYMIZ —
+    // provider-manager updateRecommendationProfile allaqachon ID'ni nomga map
+    // qilgan (REGION_NAMES: "14" → "toshkent"). Bu yerda qayta yozilsa, LLM
+    // composer'ga "Shahar/viloyat: 14" kabi ma'nosiz ID borib qolardi.
+    // Faqat city hali yo'q bo'lsa (provider-manager map qilmagan) ID saqlanadi
+    // (tool-router uni region ID sifatida o'qiy oladi).
+    if (entities.region && metadataUpdate.currentRegion && !profile.city) {
       profile.city = entities.region;
     }
     // Til: "ingliz tilim yaxshi"

@@ -17,6 +17,7 @@ import { intentClassifier } from "./intent-classifier";
 import { lookupManager } from "@/data/lookups";
 import { detectDirectionCategory, hasInterestPhrase, GENERIC_TOPIC_HEADING } from "./direction-synonyms";
 import { getSelfCompleteIntents } from "./intent-config";
+import { normalizeUserText } from "./text-normalizer";
 import {
   extractUserProfile,
   extractPreferredCities,
@@ -43,7 +44,20 @@ export interface FollowUpResult {
  */
 export function extractAdmissionFailed(message: string): boolean {
   if (!message) return false;
-  return /\b(?:imtihon(?:dan)?\s+(?:yiqildim|y?iqilib|o\'ta\s+olmadim|o\'tolmadim)|o\'qishga\s+(?:kira\s+olmadim|kira\s+olmadim|kirmadim|kirmaganman)|qabul(?:dan)?\s+(?:o\'ta\s+olmadim|o\'tolmadim|yutqazdim)|ball(?:im|im)?\s+(?:yetmadi|yetmayapti|yetmaydi)|grant(?:ga)?\s+(?:kira\s+olmadim|ololmadim|yutolmaganman)|kvota(?:ga)?\s+(?:kira\s+olmadim|tushmadim|olmaganman)|o\'qishga\s+olishmadi|qabul\s+qilmadi|kirmadim\s+o\'qishga|yiqildim)\b/i.test(message);
+  return /\b(?:imtihon(?:dan)?\s+(?:yiqildim|y?iqilib|o\'ta\s+olmadim|o\'tolmadim)|o\'qishga\s+(?:kira\s+olmadim|kira\s+olmadim|kirmadim|kirmaganman)|qabul(?:dan)?\s+(?:o\'ta\s+olmadim|o\'tolmadim|yutqazdim)|ball(?:im|im)?\s+(?:yetmadi|yetmayapti|yetmaydi)|grant(?:ga)?\s+(?:kira\s+olmadim|ololmadim|yutolmaganman)|kvota(?:ga)?\s+(?:kira\s+olmadim|tushmadim|olmaganman)|o\'qishga\s+olishmadi|qabul\s+qilmadi|kirmadim\s+o\'qishga|(?:universitet|oliygoh)(?:ga|larga)?\s+kira\s+olmadim|kira\s+olmadim|yiqildim)\b/i.test(message);
+}
+
+/**
+ * STAGE 14c — WANTS-TO-STUDY EXTRACTOR:
+ * Foydalanuvchi o'qishni davom ettirishni xohlayotganini bildiruvchi iboralar:
+ *   "o'qimoqchiman", "kirmoqchiman", "topshirmoqchiman", "o'qishni
+ *   xohlayman/istayman", "o'rganmoqchiman", "o'qishga kiraman"...
+ * admissionFailed bilan birga "imtihondan yiqildim, LEKIN o'qishni xohlayman"
+ * vaziyatini to'ldiradi — private-first tavsiya kuchayadi (alternativ yo'l).
+ */
+export function extractWantsToStudy(message: string): boolean {
+  if (!message) return false;
+  return /\b(?:o'qimoqchiman|o'qishni\s+(?:xohlayman|istayman|xohlayapman)|kirmoqchiman|kirishni\s+(?:xohlayman|istayman)|topshirmoqchiman|o'rganmoqchiman|o'qishga\s+(?:kira\s+olamanmi|kirsam\s+bo'ladimi|kirishni\s+xohlayman|topshirmoqchi(?:man)?|kirishim\s+kerak)|yana\s+o'qimoqchiman|o'qishni\s+davom\s+ettirmoqchiman)\b/i.test(message);
 }
 
 /**
@@ -54,6 +68,109 @@ export function extractAdmissionFailed(message: string): boolean {
  * va tuition_search o'z-o'zidan to'liq — ular kontekstga bog'lanmasligi kerak.
  */
 export const NON_ENHANCE_INTENTS: string[] = getSelfCompleteIntents();
+
+/**
+ * STAGE 14c — SITUATIONAL RECOMMENDATION (TASK 2):
+ * Recommendation vs Search ajratishi CONVERSATION CONTEXT + user vaziyatiga
+ * asoslanadi — faqat kalit so'zlarga emas.
+ *
+ * Hozirgi xato (log): "imtihondan yiqildim" → "tibbiyotga qiziqaman,
+ * Toshkentda yashayman" → direction_search + template ("Sizga mos
+ * universitetlar") bo'lib qolardi. To'g'risi: user o'z vaziyatini aytib
+ * MASLAHAT kutyapti → recommendation.
+ *
+ * Qoida: profile'da admissionFailed/wantsToStudy (yig'ilgan conversation
+ * context) BOR bo'lsa VA hozirgi xabar qiziqish/maqsad/shahar bildirsa →
+ * recommendation. Lekin:
+ *   - Aniq university nomi so'ralgan bo'lsa → search ("TTA haqida ayt")
+ *   - Aniq katalog so'rovi ("yo'nalishlari ro'yxati") → search
+ *   - direction_detail ("davolash ishi haqida ko'proq ma'lumot") → search
+ *
+ * @returns true → intent recommendation ga o'tkazilishi kerak
+ */
+export function isSituationalRecommendation(
+  message: string,
+  intent: IntentResult,
+  sessionContext: SessionContext | undefined
+): boolean {
+  // Data-search, admission va suhbat intent'larida ishlaydi. "imtihondan
+  // yiqildim, o'qishni orzu qilaman" kabi xabarlar general_chat'ga tushadi
+  // (ruhiy signal) — lekin unda o'qishni davom ettirish niyati ham bor, shuning
+  // uchun vaziyat+qiziqish signali bo'lsa recommendation ga o'tkaziladi.
+  // Boshqa aniq intent'lar (greeting, thanks, comparison...) o'z yo'liga qoladi.
+  const allowed = ["direction_search", "university_search", "admission", "faq", "unknown", "general_chat"];
+  if (!allowed.includes(intent.intent)) {
+    return false;
+  }
+
+  // Apostrof normalizatsiyasi: jingalak (’, ‘) / teskari (`) → to'g'ri (').
+  // Real foydalanuvchi "o’qimoqchiman" yozadi — regex'lar to'g'ri apostrof
+  // bilan, shuning uchun avval bir xil shaklga keltiramiz.
+  const m = normalizeUserText(message).replace(/[’‘`]/g, "'");
+
+  // GUARD 1: aniq university nomi → o'sha univ haqida so'rov (search qoladi)
+  // "Toshkent tibbiyot akademiyasida davolash ishi bormi?" → direction_search
+  if (intent.entities?.university) return false;
+
+  // GUARD 1.5 (REVIEWER FIX): general_chat/unknown uchun entity talabi.
+  // Intent-classifier'ning GENERAL_CHAT override'i ruhiy maslahatni qasddan
+  // general_chat'ga yuboradi ("imtihondan yiqildim, o'qishni orzu qilaman.
+  // Qanday maslahat berasiz?") — data tool'larini ishga tushirmaslik uchun.
+  // Bu yerda uni recommendation'ga YUTIB YUBORISH noto'g'ri bo'lardi (recommend
+  // tool clarifying savollar so'ray boshlaydi). Qoida: general_chat/unknown
+  // faqat direction/region entity BOR bo'lgandagina recommendation'ga o'tadi —
+  // "tibbiyotga qiziqaman" (direction bor) → recommendation, "Qanday maslahat
+  // berasiz" (entity yo'q) → general_chat qoladi.
+  if (intent.intent === "general_chat" || intent.intent === "unknown") {
+    // Entity (yo'nalish/shahar) bor bo'lsa → recommendation mumkin ("tibbiyotga
+    // qiziqaman" kabi). YOKI aniq o'qish istagi bo'lsa ("o'qimoqchiman",
+    // "kirmoqchiman") → ham recommendation mumkin (user O'QISHNI davom
+    // ettirishni xohlayapti, ruhiy maslahat so'ramayapti).
+    // "orzu qilaman + qanday maslahat berasiz" (ruhiy maslahat) esa wantsToStudy
+    // signali bermaydi → general_chat qoladi (reviewer fix).
+    const hasEntity = !!intent.entities?.direction || !!intent.entities?.region || !!intent.entities?.university;
+    const hasStudyIntent = extractWantsToStudy(m);
+    if (!hasEntity && !hasStudyIntent) return false;
+  }
+
+  // GUARD 2: aniq katalog/ro'yxat so'rovi → search qoladi
+  // "Toshkentda tibbiyot yo'nalishi bormi?" / "yo'nalishlari ro'yxati"
+  if (/\b(ro'yxati|katalogi|mavjud|mavjudmi|bormi\??|bormikan|nechta|qancha\s+(?:universitet|yo'nalish)|qaysi\s+(?:universitet|oliygoh)(?:lar|larida|laridan|lariga)?\s+bor)\b/i.test(m)) {
+    return false;
+  }
+
+  // GUARD 3: direction_detail / batafsil ma'lumot so'rovi → search qoladi
+  if (intent.entities?.queryType === "direction_detail" ||
+      /\b(haqida\s+(?:ma'lumot|info|gapir|ayt|tushuntir|ber)|batafsil)\b/i.test(m)) {
+    return false;
+  }
+
+  // Conversation context: oldingi xabarlardan yig'ilgan user vaziyati
+  const profile = sessionContext?.recommendationProfile;
+  const hasSituationContext =
+    profile?.admissionFailed === true || profile?.wantsToStudy === true;
+
+  // Qiziqish/maqsad signali — user maslahat kutyapti ("qiziqaman",
+  // "xohlayman", "orzu qilaman", "bo'lmoqchiman"...)
+  const hasInterestSignal =
+    /\b(qiziqaman|qiziqtiradi|yoqadi|yaxshi\s+ko'raman|bo'lmoqchiman|o'qimoqchiman|o'rganmoqchiman|kirmoqchiman|xohlayman|xohlayapman|orzu\s+qilaman|maqsadim|ishlamoqchiman|topshirmoqchiman|topib\s+ber(?:ing)?)\b/i.test(m);
+
+  // Vaziyat bildiruvchi shahar iborasi: "Toshkentda yashayman", "Toshkent
+  // shahrida" — user kontekstini to'ldiradi (maslahat signali bilan birga).
+  const hasLivingContext =
+    /\b(yashayman|yashaymiz|yashayapman|joylashganman|kelganman|yashaydigan)\b/i.test(m);
+
+  // Hozirgi xabarning O'ZIDA ham vaziyat bo'lishi mumkin ("yiqildim, lekin
+  // o'qimoqchiman") — profile yig'ilishidan oldin ham ishlashi uchun.
+  const hasSituationInMsg = extractAdmissionFailed(m);
+
+  // ASOSIY QAROR: conversation situation + interest/living → recommendation
+  if (hasSituationContext && (hasInterestSignal || hasLivingContext)) return true;
+  // Hozirgi xabarda vaziyat + qiziqish birga kelsa (profil hali bo'lmasa ham)
+  if (hasSituationInMsg && hasInterestSignal) return true;
+
+  return false;
+}
 
 /**
  * PROFILE BUILDER — har bir xabardagi ma'lumotlarni session profile'ga qo'shadi.
@@ -143,6 +260,14 @@ export function updateRecommendationProfile(
   if (extractAdmissionFailed(userMessage)) {
     profile.admissionFailed = true;
     console.log(`[UserState] admissionFailed=true ("${userMessage.substring(0, 60)}")`);
+  }
+
+  // STAGE 14c — USER STATE: "o'qimoqchiman", "kirmoqchiman", "o'qishni
+  // xohlayman" → wantsToStudy=true. admissionFailed bilan birga yig'iladi —
+  // "imtihondan yiqildim, lekin o'qishni xohlayman" vaziyati shakllanadi.
+  if (extractWantsToStudy(userMessage)) {
+    profile.wantsToStudy = true;
+    console.log(`[UserState] wantsToStudy=true ("${userMessage.substring(0, 60)}")`);
   }
 
   // Region: entities'dan kelgan region → home city

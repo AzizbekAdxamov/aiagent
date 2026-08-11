@@ -5,7 +5,7 @@ import { contextBuilder } from "./context-builder";
 import { intentClassifier } from "./intent-classifier";
 import { toolRouter } from "./tool-router";
 import { embeddingService } from "./embedding-service";
-import { augmentFollowUp, updateRecommendationProfile } from "./follow-up-context";
+import { augmentFollowUp, updateRecommendationProfile, isSituationalRecommendation } from "./follow-up-context";
 import { getIntentDataFlag, getIntentResponseStrategy } from "./intent-config";
 import { buildEntityExtractionPrompt, parseEntitiesJSON } from "./llm-entity-extractor";
 import { responseBuilder } from "./formatter";
@@ -453,6 +453,29 @@ class ProviderManager {
       };
       console.log(`[QueryResolver] type=${resolvedQuery.type}${resolvedQuery.directionPhrase ? `, phrase="${resolvedQuery.directionPhrase}"` : ""} (intent=${intent.intent})`);
 
+      // ===== STAGE 14c — SITUATIONAL RECOMMENDATION OVERRIDE (TASK 2) =====
+      // User o'z vaziyatini aytib MASLAHAT kutyapti (recommendation), shunchaki
+      // katalog so'ramayapti (search). Logdagi xato: "imtihondan yiqildim" →
+      // "tibbiyotga qiziqaman, Toshkentda yashayman" → direction_search + template
+      // bo'lib qolardi. Qoida (user):
+      //   "Toshkentda tibbiyot yo'nalishi bormi?"  → direction_search (fakt so'rov)
+      //   "Imtihondan yiqildim, doktor bo'lmoqchiman" → recommendation (maslahat)
+      // Conversation context (admissionFailed/wantsToStudy profil'da yig'ilgan)
+      // + hozirgi xabardagi qiziqish/maqsad → recommendation ga o'tkaziladi.
+      // Aniq university/katalog/detail so'rovlari guard bilan search qoladi.
+      if (
+        (resolvedQuery.type === "direction_search" ||
+         resolvedQuery.type === "university_search" ||
+         resolvedQuery.type === "general_chat" ||
+         resolvedQuery.type === "unknown") &&
+        isSituationalRecommendation(effectiveMessage, intent, sessionContext)
+      ) {
+        intent.intent = "recommendation";
+        intent.confidence = 0.9;
+        intent.entities = { ...intent.entities, queryType: "recommendation" };
+        console.log(`[SituationalRec] → recommendation (conversation situation): "${effectiveMessage.substring(0, 70)}"`);
+      }
+
       console.log(`[DEBUG] Final intent: ${intent.intent}, secondaryIntents:`, intent.secondaryIntents, `, effectiveMessage: ${effectiveMessage}`);
 
       // Step 1.55: FIELD CLARIFICATION (BOSQICH 12 — user qoidasi 8)
@@ -728,7 +751,7 @@ class ProviderManager {
       // LLM "nega aynan shular" tahlilini yozadi. LLM muvaffaqiyatsiz bo'lsa →
       // template fallback (agent buzilmaydi).
       if (isDataIntent && hasRealData && responseStrategy === "hybrid" && this.initialized) {
-        const hybridResult = await this.tryHybridResponse(intent, toolResults, conversationHistory, userMessage, language);
+        const hybridResult = await this.tryHybridResponse(intent, toolResults, conversationHistory, userMessage, language, sessionContext);
         if (hybridResult !== null) {
           console.log(`[DEBUG] HYBRID response (compact data + LLM analysis) via ${hybridResult.provider}`);
           return {
@@ -893,6 +916,52 @@ class ProviderManager {
    * kabi tavsiya qaroriga ta'sir qiladigan maydonlar yuboriladi (token 3-5x kam).
    */
   /**
+   * STAGE 14c — USER SITUATION BLOCK (TASK 3):
+   * Conversation'dan yig'ilgan user vaziyatini LLM'ga beriladigan matnga
+   * aylantiradi. LLM API ma'lumotini o'zi o'ylab topmaydi — shu holatni
+   * tabiiy tilda izohlab, user kontekstiga mos javob yozadi.
+   *
+   * Misol: admissionFailed + wantsToStudy + city="toshkent" →
+   *   "Foydalanuvchi vaziyati: ... imtihondan o'ta olmagan (admission_failed).
+   *    O'qishni davom ettirishni xohlaydi (wants_to_study). Shahar: toshkent."
+   *
+   * Empty → null (hech qanday vaziyat yig'ilmagan — blok qo'shilmaydi).
+   */
+  private buildUserSituationBlock(sessionContext?: any): string | null {
+    const profile = sessionContext?.recommendationProfile;
+    if (!profile || typeof profile !== "object") return null;
+
+    const lines: string[] = ["Foydalanuvchi vaziyati (conversation state):"];
+    if (profile.admissionFailed === true) {
+      lines.push("- Avvalgi xabarda imtihondan o'ta olmaganini aytgan (admission_failed). Xususiy universitetlar ustuvor bo'lishi mumkin — lekin user davlatni aniq so'rasa, davlat ham ko'rsatiladi.");
+    }
+    if (profile.wantsToStudy === true) {
+      lines.push("- O'qishni davom ettirishni xohlaydi (wants_to_study).");
+    }
+    if (profile.city) {
+      lines.push(`- Shahar/viloyat: ${profile.city}`);
+    }
+    if (Array.isArray(profile.interests) && profile.interests.length > 0) {
+      lines.push(`- Qiziqishlar: ${profile.interests.join(", ")}`);
+    }
+    if (profile.careerGoal) {
+      lines.push(`- Kasbiy maqsad: ${profile.careerGoal}`);
+    }
+    if (profile.budgetLevel) {
+      const labels: Record<string, string> = { low: "kam byudjet", mid: "o'rtacha byudjet", high: "yuqori byudjet" };
+      lines.push(`- Byudjet: ${labels[profile.budgetLevel] || profile.budgetLevel}`);
+    }
+    if (Array.isArray(profile.weaknesses) && profile.weaknesses.length > 0) {
+      lines.push(`- Zaif fanlar: ${profile.weaknesses.join(", ")}`);
+    }
+    if (profile.interestGrant) lines.push("- Grant qiziqishi bor.");
+    if (profile.wantsHostel) lines.push("- Yotoqxona kerak.");
+    if (profile.wantsForeign) lines.push("- Xorijga ketish niyati bor.");
+
+    return lines.length > 1 ? lines.join("\n") : null;
+  }
+
+  /**
    * HYBRID ENGINE — muvaffaqiyatli provider nomini ham qaytaradi
    * (analytics to'g'ri ko'rsatsin: Groq emas, balki haqiqiy javob bergan provider).
    */
@@ -901,7 +970,8 @@ class ProviderManager {
     toolResults: any[],
     conversationHistory: ChatMessage[],
     userMessage: string,
-    language: "uz" | "ru" | "en"
+    language: "uz" | "ru" | "en",
+    sessionContext?: any
   ): Promise<{ content: string; provider: string } | null> {
     const compactContext = buildCompactContext(toolResults as any);
     if (!compactContext.trim()) {
@@ -909,14 +979,25 @@ class ProviderManager {
       return null;
     }
 
+    // STAGE 14c — USER SITUATION BLOCK (TASK 3):
+    // LLM'ga faqat API ma'lumotlari emas, conversation'dan yig'ilgan USER
+    // VAZIYATI ham beriladi. Shunda javob tabiiy bo'ladi: "Siz avval bu yil
+    // imtihondan o'ta olmaganingizni aytdingiz — shuning uchun hozircha
+    // xususiy universitetlarni ko'rib chiqish mantiqli..."
+    // LLM ma'lumotni o'zi o'ylab topmaydi — backend yig'gan holatni izohlaydi.
+    const situationBlock = this.buildUserSituationBlock(sessionContext);
+    const contextForLlm = situationBlock
+      ? `${situationBlock}\n\n${compactContext}`
+      : compactContext;
+
     const systemPrompt = contextBuilder.buildSystemPrompt(language);
     const errors: string[] = [];
 
     // Groq birinchi — limit xatosi bo'lsa circuit breaker ishlaydi
     if (this.groqClient && !this.shouldSkipProvider("groq")) {
       try {
-        console.log(`[Hybrid] Trying Groq (compact context: ${compactContext.length} chars)`);
-        const result = await this.callGroq(systemPrompt, compactContext, conversationHistory, userMessage);
+        console.log(`[Hybrid] Trying Groq (context: ${contextForLlm.length} chars${situationBlock ? ", situation included" : ""})`);
+        const result = await this.callGroq(systemPrompt, contextForLlm, conversationHistory, userMessage);
         if (result.content && result.content.trim().length > 20) {
           console.log(`[Hybrid] Groq response successful`);
           return { content: result.content, provider: "groq" };
@@ -932,7 +1013,7 @@ class ProviderManager {
     if (this.openRouterClient && !this.shouldSkipProvider("openrouter")) {
       try {
         console.log(`[Hybrid] Trying OpenRouter`);
-        const result = await this.callOpenRouter(systemPrompt, compactContext, conversationHistory, userMessage);
+        const result = await this.callOpenRouter(systemPrompt, contextForLlm, conversationHistory, userMessage);
         if (result.content && result.content.trim().length > 20) {
           console.log(`[Hybrid] OpenRouter response successful`);
           return { content: result.content, provider: "openrouter" };
@@ -948,7 +1029,7 @@ class ProviderManager {
     if (this.deepseekClient && !this.shouldSkipProvider("deepseek")) {
       try {
         console.log(`[Hybrid] Trying DeepSeek`);
-        const result = await this.callDeepSeek(systemPrompt, compactContext, conversationHistory, userMessage);
+        const result = await this.callDeepSeek(systemPrompt, contextForLlm, conversationHistory, userMessage);
         if (result.content && result.content.trim().length > 20) {
           console.log(`[Hybrid] DeepSeek response successful`);
           return { content: result.content, provider: "deepseek" };
@@ -964,7 +1045,7 @@ class ProviderManager {
     if (this.geminiModel) {
       try {
         console.log(`[Hybrid] Trying Gemini`);
-        const result = await this.callGemini(systemPrompt, compactContext, conversationHistory, userMessage);
+        const result = await this.callGemini(systemPrompt, contextForLlm, conversationHistory, userMessage);
         if (result.content && result.content.trim().length > 20) {
           console.log(`[Hybrid] Gemini response successful`);
           return { content: result.content, provider: "gemini" };
@@ -979,7 +1060,7 @@ class ProviderManager {
     if (this.openaiClient) {
       try {
         console.log(`[Hybrid] Trying OpenAI`);
-        const result = await this.callOpenAI(systemPrompt, compactContext, conversationHistory, userMessage);
+        const result = await this.callOpenAI(systemPrompt, contextForLlm, conversationHistory, userMessage);
         if (result.content && result.content.trim().length > 20) {
           console.log(`[Hybrid] OpenAI response successful`);
           return { content: result.content, provider: "openai" };

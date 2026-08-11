@@ -346,6 +346,13 @@ export interface SessionContext {
      * EMAS) — user explicit ravishda davlat so'ramasa (explicit > inference).
      */
     admissionFailed?: boolean;
+    /**
+     * STAGE 14c — USER STATE: foydalanuvchi o'qishni davom ettirishni
+     * xohlayotgani ("o'qimoqchiman", "kirmoqchiman", "topshirmoqchiman",
+     * "o'qishni xohlayman"). admissionFailed bilan birga "yana o'qishga
+     * kirish imkoniyati" kontekstini beradi — private-first tavsiya kuchayadi.
+     */
+    wantsToStudy?: boolean;
   };
   /**
    * RECOMMENDATION MEMORY (BOSQICH 9): oxirgi tavsiya qilingan universitetlar.
