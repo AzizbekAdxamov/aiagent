@@ -10,6 +10,7 @@ import { getIntentDataFlag, getIntentResponseStrategy } from "./intent-config";
 import { buildEntityExtractionPrompt, parseEntitiesJSON } from "./llm-entity-extractor";
 import { responseBuilder } from "./formatter";
 import { detectRequestField, isBareFieldRequest, requestFieldLabel } from "./request-field";
+import { resolveQuery } from "./query-resolver";
 import { universityClarificationResponse } from "./formatter/common";
 import { buildCompactContext } from "./compact-context";
 import { buildSnapshotHistory } from "./compact-history";
@@ -438,6 +439,19 @@ class ProviderManager {
           intent.entities
         );
       }
+
+      // QUERY RESOLVER (BOSQICH 14): intent'dan tashqari qatlam — userning ASL
+      // so'rovi nimani anglatishini aniqlaydi. Misol: "davolash ishi haqida
+      // ko'proq ma'lumot" → direction_detail (yo'nalishning o'zi, universitet
+      // ro'yxati EMAS). Natija entities.queryType ga yoziladi — tool-router
+      // va formatter shu yerga qarab ishlaydi.
+      const resolvedQuery = resolveQuery(effectiveMessage, intent);
+      intent.entities = {
+        ...intent.entities,
+        queryType: resolvedQuery.type,
+        ...(resolvedQuery.directionPhrase ? { directionPhrase: resolvedQuery.directionPhrase } : {}),
+      };
+      console.log(`[QueryResolver] type=${resolvedQuery.type}${resolvedQuery.directionPhrase ? `, phrase="${resolvedQuery.directionPhrase}"` : ""} (intent=${intent.intent})`);
 
       console.log(`[DEBUG] Final intent: ${intent.intent}, secondaryIntents:`, intent.secondaryIntents, `, effectiveMessage: ${effectiveMessage}`);
 

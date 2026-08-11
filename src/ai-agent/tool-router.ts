@@ -52,6 +52,15 @@ export class ToolRouter {
   };
 
   /**
+   * QUERY RESOLVER natijasini intent'ga yopishtirish (BOSQICH 14):
+   * provider-manager resolveQuery() chaqirib, natijani entities.queryType ga
+   * yozadi — tool-router shu yerga qarab directionDetail rejimini yoqadi.
+   */
+  private queryDetailOnly(intent: IntentResult): boolean {
+    return intent.entities?.queryType === "direction_detail";
+  }
+
+  /**
    * EXPLANATION (BOSQICH 14): "Nega aynan TATU?" / "Nima uchun shu?" —
    * backend hisoblagan score.reasons/nuances asosida javob beradi.
    * Qayta hisoblamaydi — recommend ishlaganda sessionContext.lastRecommendations'
@@ -1061,6 +1070,82 @@ export class ToolRouter {
    *   3. Foydalanuvchi kalit so'ziga mos yo'nalishlarni tanlaydi
    *   4. Mos universitetlarning to'liq (user-side) ma'lumotini qo'shib qaytaradi
    */
+  /**
+   * RESULT VALIDATOR (BOSQICH 14) — searchDirection natijasini moslik bo'yicha cheklaydi.
+   *
+   * User "tibbiyot/davolash ishi" so'raganda natijada IT univlar (TATU) yoki
+   * faqat 1-2 ta yondosh yo'nalishi bor univlar chiqib ketmasligi uchun:
+   * har bir mos universitetning "qancha ANIQ yo'nalishi" so'ralgan kategoriyaga
+   * mos kelishini hisoblab, MAJOR-DENSITY qoidasiga (recommend'dagi bilan bir xil)
+   * mos kelmaydiganlarni chiqarib tashlaydi.
+   *
+   * Qoida (per-kategoriya, MAJOR_DENSITY_RULES):
+   *   (minStrong+ aniq yo'nalish VA minShare+ ulush) YOKI orShare+ ulush.
+   * Barchasi chiqib ketsa — relaxed fallback: kamida minStrong aniq yo'nalishi
+   * bor univlar qoladi ("topilmadi" o'rniga haqiqiy variantlar).
+   *
+   * @returns filterdan o'tgan univ id'lari (jamlanma soni bilan)
+   */
+  private validateDirectionResults(
+    candidateIds: number[],
+    matches: any[],
+    directionCategory: string | undefined,
+    totalDirsByUni?: Map<number, number>
+  ): { ids: number[]; total: number } {
+    if (!directionCategory || candidateIds.length === 0) {
+      return { ids: candidateIds, total: candidateIds.length };
+    }
+
+    // Har bir mos univ uchun ANIQ (specific) yo'nalishlar soni
+    const strongByUni = new Map<number, number>();
+    const seen = new Set<string>();
+    for (const m of matches as any[]) {
+      if (!candidateIds.includes(m.universityId)) continue;
+      if (m.matchStrong) {
+        const key = `${m.universityId}:${(m.nameUz || m.nameEn || '').toLowerCase().replace(/\s+/g, ' ').trim()}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          strongByUni.set(m.universityId, (strongByUni.get(m.universityId) || 0) + 1);
+        }
+      }
+    }
+
+    const rule = this.getMajorDensityRule(directionCategory);
+    const passing: number[] = [];
+    const relaxed: number[] = [];
+    for (const id of candidateIds) {
+      const strongCount = strongByUni.get(id) || 0;
+      if (strongCount < 1) {
+        console.log(`[Validator] Univ #${id} chiqarildi — 0 ta aniq "${directionCategory}" yo'nalishi`);
+        continue;
+      }
+      // MUHIM: ulush REAL jami yo'nalishlar soniga nisbatan hisoblanadi
+      // (batch'da yig'ilgan totalDirsByUni). Mos yo'nalishlar soniga emas —
+      // aks holda 2 ta mos kelgan biologiya/kimyo univi 100% bo'lib qolardi!
+      // REVIEWER FIX: real total NO'L (API timeout) bo'lsa || strongCount ga
+      // tushib 100% bo'lib qolmasin — undefined/0 bo'lsa konservativ: strongCount
+      // (faqat moslar) emas, ulushni to'liq ishonchsiz deb qoldirib strongCount
+      // bilan tekshiramiz (share=100% o'rniga minStrong qoidasi ishlaydi).
+      const rawTotal = totalDirsByUni?.get(id);
+      const total = rawTotal !== undefined && rawTotal > 0 ? rawTotal : strongCount;
+      const share = strongCount / Math.max(total, 1);
+      const passesMajor = (strongCount >= rule.minStrong && share >= rule.minShare) || share >= rule.orShare;
+      console.log(`[Validator] Univ #${id}: ${strongCount}/${total} aniq (ulush ${Math.round(share * 100)}%) → ${passesMajor ? "O'TDI" : "chiqarildi"}`);
+      if (passesMajor) {
+        passing.push(id);
+      } else if (strongCount >= rule.minStrong) {
+        relaxed.push(id);
+      }
+    }
+
+    // HAMMASI chiqib ketsa — relaxed (minStrong yetganlar) qoladi
+    if (passing.length === 0 && relaxed.length > 0) {
+      console.log(`[Validator] Fallback: minShare yumshatildi — ${relaxed.length} ta univ (minStrong=${rule.minStrong} yetdi)`);
+      return { ids: relaxed, total: relaxed.length };
+    }
+    return { ids: passing, total: passing.length };
+  }
+
   private async searchDirection(intent: IntentResult, sessionContext?: any, userMessage?: string): Promise<ToolResult> {
     try {
       // 1. Barcha universitetlarni olish (nom + id)
@@ -1256,6 +1341,9 @@ export class ToolRouter {
       const matches: any[] = [];
       const userSideCache = new Map<number, any>();
       const catMatched: number[] = [];
+      // RESULT VALIDATOR (BOSQICH 14): har univning REAL jami yo'nalishlar soni
+      // (ulush hisoblash uchun — "TTA 6/30 ta tibbiyot" vs "TATU 1/40 ta").
+      const totalDirsByUni = new Map<number, number>();
 
       // Ko'rsatiladigan universitetlar soni (shu son topilsa batch'lar to'xtaydi)
       const TARGET_SHOW = 8;
@@ -1312,6 +1400,15 @@ export class ToolRouter {
             }))
           )
         );
+        // Validator uchun REAL jami yo'nalishlar sonini saqlaymiz
+        for (const r of results) {
+          if (r.status === 'fulfilled' && (r as any).value) {
+            const v = (r as any).value;
+            if (!totalDirsByUni.has(v.universityId)) {
+              totalDirsByUni.set(v.universityId, Array.isArray(v.dirs) ? v.dirs.length : 0);
+            }
+          }
+        }
         collectMatches(results);
       };
 
@@ -1418,6 +1515,26 @@ export class ToolRouter {
         totalMatches = candidateIds.length;
         console.log(`[Direction] Category filter (user-side, chunked): ${catMatched.length} ta → false-positive'dan keyin ${candidateIds.length} ta`);
       }
+
+      // RESULT VALIDATOR (BOSQICH 14): yo'nalish kategoriyasi aniq bo'lsa,
+      // natijadagi IRRELEVANT universitetlarni kesamiz — "doktor bo'lishni
+      // orzu qilaman" (tibbiyot) so'rovida faqat 1-2 ta yondosh yo'nalishi
+      // bor IT univlar (TATU kabi) chiqib ketmasligi uchun. Major-density
+      // qoidasi recommend'dagi bilan bir xil — natijalar izchil bo'ladi.
+      const searchCategory = searchKeyword ? detectDirectionCategory(searchKeyword) : undefined;
+      if (searchCategory && candidateIds.length > 0) {
+        const validated = this.validateDirectionResults(candidateIds, matches, searchCategory, totalDirsByUni);
+        console.log(`[Validator] "${searchCategory}": ${candidateIds.length} ta → ${validated.ids.length} ta mos`);
+        candidateIds = validated.ids;
+        totalMatches = validated.total;
+      }
+
+      // DIRECTION DETAIL (BOSQICH 14 — Query Resolver): user yo'nalishning O'ZI
+      // haqida so'ragan bo'lsa ("davolash ishi haqida ko'proq ma'lumot"),
+      // formatter yo'nalish detail rejimida javob beradi — "Sizga mos
+      // universitetlar" reklamasi emas, balki yo'nalishning o'zi + qayerlarda
+      // borligi ko'rsatiladi.
+      const directionDetailOnly = this.queryDetailOnly(intent);
 
       const MAX_SHOW_UNIS = 8;
 
@@ -1536,6 +1653,24 @@ export class ToolRouter {
         this.rememberUniversity(sessionContext, enrichedUniversities[0]);
       }
 
+      // BOSQICH 14 — LAST DIRECTION MEMORY: oxirgi muhokama qilingan yo'nalishni
+      // eslab qolamiz ("Tibbiyotga qiziqaman → davolash ishi-chi? → qayerlarda
+      // bor?"). Keyingi follow-up so'rovlar shu yo'nalishga bog'lanadi.
+      // REVIEWER FIX: kategoriyaga map bo'lmagan aniq yo'nalishlar ham
+      // (intent.entities.direction) eslab qolinadi.
+      const lastDirCategory = searchCategory || intent.entities?.direction;
+      if (sessionContext && lastDirCategory) {
+        sessionContext.lastDirection = {
+          name: lastDirCategory,
+          category: lastDirCategory,
+        };
+        console.log(`[Direction] lastDirection → "${lastDirCategory}"`);
+      }
+
+      const dirPhrase =
+        (intent.entities?.directionPhrase as string | undefined) ||
+        (searchCategory ? this.directionCategoryLabel(searchCategory) : undefined);
+
       return {
         tool: "search_direction" as any,
         success: true,
@@ -1544,11 +1679,28 @@ export class ToolRouter {
           universities: enrichedUniversities,
           universityDirections: undefined,
           totalMatches,
+          // QUERY RESOLVER (BOSQICH 14): detail rejimda formatter yo'nalishning
+          // o'zi haqida javob beradi, universitetlar reklamasi emas.
+          directionDetail: directionDetailOnly || undefined,
+          directionPhrase: directionDetailOnly ? dirPhrase : undefined,
+          directionCategory: searchCategory,
         },
       };
     } catch (error) {
       return this.errorResult("search_direction", "Yo'nalish ma'lumotlarini olishda xatolik", error);
     }
+  }
+
+  /** Yo'nalish kategoriya nomi → o'zbekcha label (formatter va lastDirection uchun) */
+  private directionCategoryLabel(category: string): string {
+    const labels: Record<string, string> = {
+      it: "IT", tibbiyot: "Tibbiyot", biomedical: "Biotibbiyot / Biomedical",
+      iqtisod: "Iqtisod va moliya", huquq: "Huquq", pedagogika: "Pedagogika",
+      muhandislik: "Muhandislik", filologiya: "Filologiya (tillar)",
+      sanat: "San'at", sport: "Sport", qishloq: "Qishloq xo'jaligi",
+      turizm: "Turizm", tarix: "Tarix",
+    };
+    return labels[category] || category;
   }
 
   /**

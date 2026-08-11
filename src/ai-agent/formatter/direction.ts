@@ -2,6 +2,57 @@
  * FORMATTER: search_direction va list_directions tool natijalarini formatlash.
  */
 
+/**
+ * DIRECTION DETAIL (BOSQICH 14 — Query Resolver):
+ * User yo'nalishning O'ZI haqida so'ragan ("davolash ishi haqida ko'proq
+ * ma'lumot") — javob "Sizga mos universitetlar" reklamasi EMAS, balki
+ * yo'nalishning o'zi + qaysi universitetlarda borligi ko'rsatiladi.
+ * Boshqa (irrelevant) universitetlar aralashtirilmaydi — faqat shu
+ * yo'nalish bor univlar havola sifatida keltiriladi.
+ */
+export function formatDirectionDetail(firstResult: any, directionPhrase?: string): string {
+  const data = firstResult.data || {};
+  const uniList = Array.isArray(data.universities) ? data.universities : [];
+  const dirList = Array.isArray(data.directions) ? data.directions : [];
+
+  const dirName =
+    (typeof directionPhrase === "string" && directionPhrase.trim().length > 0 && directionPhrase.trim())
+    || data.directionCategory
+    || (dirList[0]?.nameUz || dirList[0]?.nameEn)
+    || "Bu yo'nalish";
+
+  let response = `### 📚 ${dirName}\n\n`;
+
+  if (dirList.length > 0) {
+    // Aniq yo'nalish nomlari (API'dan real ma'lumot)
+    const rawNames: string[] = dirList.map((d: any) => String(d.nameUz || d.nameEn || '').trim());
+    const names: string[] = Array.from(new Set(rawNames)).filter((x) => x.length > 0).slice(0, 12);
+    if (names.length > 0) {
+      response += `**${dirName}** yo'nalishi bo'yicha mavjud ma'lumot:\n\n`;
+      names.forEach((n: string) => {
+        response += `• ${n}\n`;
+      });
+      response += `\n`;
+    }
+  } else if (uniList.length > 0) {
+    response += `**${dirName}** yo'nalishi bo'yicha mavjud ma'lumot topildi.\n\n`;
+  }
+
+  if (uniList.length > 0) {
+    response += `📍 **${dirName}** qaysi universitetlarda mavjud:\n`;
+    uniList.slice(0, 8).forEach((uni: any, i: number) => {
+      response += `${i + 1}. **${uni.fullNameUz || uni.fullNameEn}**`;
+      if (uni.location) response += ` — ${uni.location}`;
+      response += `\n`;
+    });
+    response += `\n`;
+  }
+
+  response += `📌 **[Mentalaba.uz](https://mentalaba.uz/directions)** — barcha yo'nalishlar katalogi\n\n`;
+  response += `Qaysi universitet bo'yicha batafsil ma'lumot kerak bo'lsa — ayting, ko'rsataman! 😊`;
+  return response;
+}
+
 /** search_direction — "yo'nalish qidiruvi" natijalari */
 export function formatDirectionSearch(firstResult: any, message: string): string {
   const directionsData = Array.isArray(firstResult.data)

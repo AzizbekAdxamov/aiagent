@@ -267,6 +267,11 @@ export interface IntentResult {
     careerGoal?: string;           // kasb maqsadi: "ai_medicine", "medicine", "software_dev"
     englishLevel?: string;         // ingliz darajasi: "C1", "B2", "IELTS 7.0"
     wantsInternational?: boolean;  // xalqaro diplom kerakmi?
+    // ---- QUERY RESOLVER (BOSQICH 14) ----
+    /** Query Resolver natijasi: direction_detail / university_field / ... */
+    queryType?: string;
+    /** direction_detail: yo'nalish nomi ("davolash ishi") — formatter shuni ko'rsatadi */
+    directionPhrase?: string;
   };
 }
 
@@ -356,6 +361,12 @@ export interface SessionContext {
    * Metadata JSON'da saqlanadi (Prisma ChatSession.metadata).
    */
   lastUniversity?: { id: number; name: string; slug?: string };
+  /**
+   * LAST DIRECTION MEMORY (BOSQICH 14 — Query Resolver): oxirgi muhokama
+   * qilingan yo'nalish ("Tibbiyotga qiziqaman → davolash ishi-chi?" zanjiri).
+   * "qayerlarda bor?" kabi follow-up so'rovlar shu yo'nalishga bog'lanadi.
+   */
+  lastDirection?: { name: string; category: string };
   /**
    * GUEST REJIM (BOSQICH 1 + GUEST): true = login qilmagan foydalanuvchi.
    * Chat route authUser yo'q bo'lganda o'rnatadi — ToolAccessPolicy shunga

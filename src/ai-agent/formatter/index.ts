@@ -27,7 +27,7 @@ import {
   generalChatResponse,
 } from "./common";
 import { formatUniversitySearch, universityNotFoundResponse } from "./university";
-import { formatDirectionSearch, formatDirectionList, directionNotFoundResponse, directionListNotFoundResponse } from "./direction";
+import { formatDirectionSearch, formatDirectionDetail, formatDirectionList, directionNotFoundResponse, directionListNotFoundResponse } from "./direction";
 import { formatTuitionSearch, tuitionNotFoundResponse } from "./tuition";
 import { formatGrantsSearch, grantsNotFoundResponse } from "./grant";
 import { formatNewsSearch, newsNotFoundResponse } from "./news";
@@ -82,7 +82,11 @@ export class ResponseBuilder {
             content = formatUniversitySearch(firstResult, message);
             break;
           case "search_direction":
-            content = formatDirectionSearch(firstResult, message);
+            // QUERY RESOLVER (BOSQICH 14): direction_detail rejimida yo'nalishning
+            // o'zi haqida javob beramiz — universitetlar ro'yxati reklamasi emas.
+            content = firstResult.data?.directionDetail
+              ? formatDirectionDetail(firstResult, firstResult.data?.directionPhrase)
+              : formatDirectionSearch(firstResult, message);
             break;
           case "list_directions":
             content = formatDirectionList(firstResult);

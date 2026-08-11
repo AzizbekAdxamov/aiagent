@@ -128,6 +128,7 @@ export async function POST(request: NextRequest) {
       recommendationProfile: metadata.recommendationProfile as SessionContext["recommendationProfile"] | undefined,
       lastRecommendations: metadata.lastRecommendations as SessionContext["lastRecommendations"] | undefined,
       lastUniversity: metadata.lastUniversity as SessionContext["lastUniversity"] | undefined,
+      lastDirection: metadata.lastDirection as SessionContext["lastDirection"] | undefined,
     };
 
     // Get conversation history
@@ -318,6 +319,17 @@ export async function POST(request: NextRequest) {
       delete metadataUpdate.lastUniversity;
     }
     // ===== LAST UNIVERSITY MEMORY (yakun) =====
+
+    // ===== LAST DIRECTION MEMORY (BOSQICH 14 — Query Resolver) =====
+    // searchDirection/recommend sessionContext.lastDirection ni yangilagan
+    // bo'lsa, uni metadata'ga yozamiz — "davolash ishi-chi?" kabi follow-up
+    // so'rovlar yo'nalishni eslab qoladi.
+    if (sessionContext.lastDirection) {
+      metadataUpdate.lastDirection = sessionContext.lastDirection;
+    } else {
+      delete metadataUpdate.lastDirection;
+    }
+    // ===== LAST DIRECTION MEMORY (yakun) =====
 
     const isExplicitUniversitySwitch = messageIntent.intent === "university_search" && !!entities.university;
 
