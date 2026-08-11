@@ -5,6 +5,9 @@ generator client {
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
+  // Neon pooler + Prisma: DATABASE_URL pooler (Prisma Client uchun),
+  // DIRECT_URL to'g'ridan-to'g'ri ulanish (db push / migrate uchun)
+  directUrl = env("DIRECT_URL")
 }
 
 model University {
