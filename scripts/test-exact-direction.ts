@@ -3,7 +3,7 @@
  * ISHLATISH: cd backend && npx tsx scripts/test-exact-direction.ts
  */
 import { detectExactDirection, hasExactDirection } from "../src/ai-agent/exact-direction";
-import { extractAdmissionFailed } from "../src/ai-agent/follow-up-context";
+import { extractAdmissionFailed } from "../src/ai-agent/entity-extractor";
 import { intentClassifier } from "../src/ai-agent/intent-classifier";
 import { resolveQuery } from "../src/ai-agent/query-resolver";
 

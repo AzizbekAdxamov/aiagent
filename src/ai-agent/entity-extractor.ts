@@ -284,6 +284,46 @@ export function extractPreferredCities(message: string): string[] {
 }
 
 /**
+ * STAGE 14 — ADMISSION FAILED EXTRACTOR:
+ * Foydalanuvchi qabuldan o'ta olmaganini bildiruvchi iboralar aniqlanadi:
+ *   "imtihondan yiqildim", "o'qishga kira olmadim", "ballim yetmadi",
+ *   "grantga kira olmadim", "qabuldan o'ta olmadim"...
+ * Bu context session bo'ylab saqlanadi (recommendationProfile.admissionFailed)
+ * va keyingi tavsiyalarda XUSUSIY universitetlar birinchi o'ringa chiqadi.
+ *
+ * NOTE (STAGE 14c): bu funksiya ENTITY EXTRACTOR'da joylashadi — barcha
+ * user-profile extractorlari (careerGoal, budget, weaknesses...) shu modulda
+ * yig'ilgan, admissionFailed ham yagona manba shu yerda bo'lishi kerak.
+ * follow-up-context.ts undan import qiladi (DRY — kod takrorlanmaydi).
+ */
+export function extractAdmissionFailed(message: string): boolean {
+  if (!message) return false;
+  // Apostrof normalizatsiyasi: jingalak (’, ‘) / teskari (`) → to'g'ri (').
+  // Real foydalanuvchi "o’qishga kira olmadim" yozadi — regex'lar to'g'ri
+  // apostrof bilan, shuning uchun extractor O'ZIDA birlashtiradi. Bu muhim:
+  // updateRecommendationProfile RAW matn bilan, isSituationalRecommendation
+  // normalize qilingan matn bilan chaqiradi — natija ikkala yo'lda bir xil.
+  const m = String(message).replace(/[’‘`]/g, "'");
+  return /\b(?:imtihon(?:dan)?\s+(?:yiqildim|y?iqilib|o\'ta\s+olmadim|o\'tolmadim)|o\'qishga\s+(?:kira\s+olmadim|kira\s+olmadim|kirmadim|kirmaganman)|qabul(?:dan)?\s+(?:o\'ta\s+olmadim|o\'tolmadim|yutqazdim)|ball(?:im|im)?\s+(?:yetmadi|yetmayapti|yetmaydi)|grant(?:ga)?\s+(?:kira\s+olmadim|ololmadim|yutolmaganman)|kvota(?:ga)?\s+(?:kira\s+olmadim|tushmadim|olmaganman)|o\'qishga\s+olishmadi|qabul\s+qilmadi|kirmadim\s+o\'qishga|(?:universitet|oliygoh)(?:ga|larga)?\s+kira\s+olmadim|kira\s+olmadim|yiqildim)\b/i.test(m);
+}
+
+/**
+ * STAGE 14c — WANTS-TO-STUDY EXTRACTOR:
+ * Foydalanuvchi o'qishni davom ettirishni xohlayotganini bildiruvchi iboralar:
+ *   "o'qimoqchiman", "kirmoqchiman", "topshirmoqchiman", "o'qishni
+ *   xohlayman/istayman", "o'rganmoqchiman", "o'qishga kiraman"...
+ * admissionFailed bilan birga "imtihondan yiqildim, LEKIN o'qishni xohlayman"
+ * vaziyatini to'ldiradi — private-first tavsiya kuchayadi (alternativ yo'l).
+ */
+export function extractWantsToStudy(message: string): boolean {
+  if (!message) return false;
+  // Apostrof normalizatsiyasi (extractAdmissionFailed'dagi kabi): jingalak /
+  // teskari apostrof → to'g'ri. Qo'ng'iroqchi qaysi yo'ldan kelsa ham bir xil.
+  const m = String(message).replace(/[’‘`]/g, "'");
+  return /\b(?:o'qimoqchiman|o'qishni\s+(?:xohlayman|istayman|xohlayapman)|kirmoqchiman|kirishni\s+(?:xohlayman|istayman)|topshirmoqchiman|o'rganmoqchiman|o'qishga\s+(?:kira\s+olamanmi|kirsam\s+bo'ladimi|kirishni\s+xohlayman|topshirmoqchi(?:man)?|kirishim\s+kerak)|yana\s+o'qimoqchiman|o'qishni\s+davom\s+ettirmoqchiman)\b/i.test(m);
+}
+
+/**
  * Foydalanuvchi niyat flaglarini ajratadi: grant, hostel, xalqaro diplom.
  */
 export function extractUserGoalFlags(message: string): {
@@ -353,6 +393,11 @@ export interface UserProfile {
   wantsGrant?: boolean;
   wantsHostel?: boolean;
   wantsInternational?: boolean;
+  // STAGE 14/14c — USER STATE: qabuldan o'ta olmagan / o'qishni davom
+  // ettirishni xohlaydi. follow-up-context updateRecommendationProfile bu
+  // flaglarni recommendationProfile'ga yozadi (xususiy-first tavsiya).
+  admissionFailed?: boolean;
+  wantsToStudy?: boolean;
 }
 
 export function extractUserProfile(message: string): UserProfile {
@@ -388,6 +433,11 @@ export function extractUserProfile(message: string): UserProfile {
   if (flags.wantsGrant) profile.wantsGrant = true;
   if (flags.wantsHostel) profile.wantsHostel = true;
   if (flags.wantsInternational) profile.wantsInternational = true;
+
+  // STAGE 14/14c — USER STATE flaglari (barcha extractorlar bir joyda):
+  // "imtihondan yiqildim" → admissionFailed, "o'qimoqchiman" → wantsToStudy
+  if (extractAdmissionFailed(message)) profile.admissionFailed = true;
+  if (extractWantsToStudy(message)) profile.wantsToStudy = true;
 
   return profile;
 }

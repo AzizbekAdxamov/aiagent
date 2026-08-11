@@ -11,7 +11,8 @@
  *    - direction_detail → search qoladi
  *    - vaziyatsiz oddiy "tibbiyot universitetlari" → search qoladi
  */
-import { extractAdmissionFailed, extractWantsToStudy, updateRecommendationProfile, isSituationalRecommendation } from "../src/ai-agent/follow-up-context";
+import { extractAdmissionFailed, extractWantsToStudy } from "../src/ai-agent/entity-extractor";
+import { updateRecommendationProfile, isSituationalRecommendation } from "../src/ai-agent/follow-up-context";
 import { intentClassifier } from "../src/ai-agent/intent-classifier";
 
 let pass = 0;

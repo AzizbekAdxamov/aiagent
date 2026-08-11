@@ -20,11 +20,10 @@ import { getSelfCompleteIntents } from "./intent-config";
 import { normalizeUserText } from "./text-normalizer";
 import {
   extractUserProfile,
-  extractPreferredCities,
-  extractCareerGoal,
-  extractEnglishLevel,
-  extractWeaknesses,
-  extractUserGoalFlags,
+  // STAGE 14/14c: USER STATE extractorlari ENTITY-EXTRACTOR'da yagona manba
+  // (barcha profile extractorlari shu modulda). Bu yerda faqat import qilinadi.
+  extractAdmissionFailed,
+  extractWantsToStudy,
 } from "./entity-extractor";
 
 export interface FollowUpResult {
@@ -34,31 +33,9 @@ export interface FollowUpResult {
   additions: string[];
 }
 
-/**
- * STAGE 14 — USER STATE EXTRACTOR:
- * Foydalanuvchi qabuldan o'ta olmaganini bildiruvchi iboralar aniqlanadi:
- *   "imtihondan yiqildim", "o'qishga kira olmadim", "ballim yetmadi",
- *   "grantga kira olmadim", "qabuldan o'ta olmadim"...
- * Bu context session bo'ylab saqlanadi (recommendationProfile.admissionFailed)
- * va keyingi tavsiyalarda XUSUSIY universitetlar birinchi o'ringa chiqadi.
- */
-export function extractAdmissionFailed(message: string): boolean {
-  if (!message) return false;
-  return /\b(?:imtihon(?:dan)?\s+(?:yiqildim|y?iqilib|o\'ta\s+olmadim|o\'tolmadim)|o\'qishga\s+(?:kira\s+olmadim|kira\s+olmadim|kirmadim|kirmaganman)|qabul(?:dan)?\s+(?:o\'ta\s+olmadim|o\'tolmadim|yutqazdim)|ball(?:im|im)?\s+(?:yetmadi|yetmayapti|yetmaydi)|grant(?:ga)?\s+(?:kira\s+olmadim|ololmadim|yutolmaganman)|kvota(?:ga)?\s+(?:kira\s+olmadim|tushmadim|olmaganman)|o\'qishga\s+olishmadi|qabul\s+qilmadi|kirmadim\s+o\'qishga|(?:universitet|oliygoh)(?:ga|larga)?\s+kira\s+olmadim|kira\s+olmadim|yiqildim)\b/i.test(message);
-}
-
-/**
- * STAGE 14c — WANTS-TO-STUDY EXTRACTOR:
- * Foydalanuvchi o'qishni davom ettirishni xohlayotganini bildiruvchi iboralar:
- *   "o'qimoqchiman", "kirmoqchiman", "topshirmoqchiman", "o'qishni
- *   xohlayman/istayman", "o'rganmoqchiman", "o'qishga kiraman"...
- * admissionFailed bilan birga "imtihondan yiqildim, LEKIN o'qishni xohlayman"
- * vaziyatini to'ldiradi — private-first tavsiya kuchayadi (alternativ yo'l).
- */
-export function extractWantsToStudy(message: string): boolean {
-  if (!message) return false;
-  return /\b(?:o'qimoqchiman|o'qishni\s+(?:xohlayman|istayman|xohlayapman)|kirmoqchiman|kirishni\s+(?:xohlayman|istayman)|topshirmoqchiman|o'rganmoqchiman|o'qishga\s+(?:kira\s+olamanmi|kirsam\s+bo'ladimi|kirishni\s+xohlayman|topshirmoqchi(?:man)?|kirishim\s+kerak)|yana\s+o'qimoqchiman|o'qishni\s+davom\s+ettirmoqchiman)\b/i.test(message);
-}
+// STAGE 14/14c — USER STATE EXTRACTORLARI entity-extractor.ts da joylashgan
+// (extractAdmissionFailed / extractWantsToStudy). Barcha profile extractorlari
+// yagona manbada bo'lishi uchun shu yerga ko'chirildi — bu yerda faqat import.
 
 /**
  * O'z-o'zidan to'liq bo'lgan (yangi mavzu ochuvchi) so'rovlar follow-up ga qo'shilmaydi.
@@ -257,7 +234,8 @@ export function updateRecommendationProfile(
   // "ballim yetmadi" → admissionFailed=true. Keyingi tavsiyalar xususiy
   // univlarni birinchi o'ringa chiqaradi (davlat emas) — user explicit
   // ravishda davlat so'ramasa (explicit request > avtomatik inference).
-  if (extractAdmissionFailed(userMessage)) {
+  // Flag'lar entity-extractor.extractUserProfile orqali keladi (yagona manba).
+  if (extracted.admissionFailed) {
     profile.admissionFailed = true;
     console.log(`[UserState] admissionFailed=true ("${userMessage.substring(0, 60)}")`);
   }
@@ -265,7 +243,7 @@ export function updateRecommendationProfile(
   // STAGE 14c — USER STATE: "o'qimoqchiman", "kirmoqchiman", "o'qishni
   // xohlayman" → wantsToStudy=true. admissionFailed bilan birga yig'iladi —
   // "imtihondan yiqildim, lekin o'qishni xohlayman" vaziyati shakllanadi.
-  if (extractWantsToStudy(userMessage)) {
+  if (extracted.wantsToStudy) {
     profile.wantsToStudy = true;
     console.log(`[UserState] wantsToStudy=true ("${userMessage.substring(0, 60)}")`);
   }
