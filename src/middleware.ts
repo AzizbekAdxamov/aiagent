@@ -16,7 +16,9 @@ import { NextRequest, NextResponse } from "next/server";
 const DEFAULT_ORIGINS = [
   "http://localhost:3000",
   "http://localhost:3001",
-  "https://aiagent-sand.vercel.app",
+  // Vercel: backend va frontend deploy manzillari
+  "https://aiagent-13wv-steel.vercel.app",
+  "https://ai-front-taupe.vercel.app",
 ];
 
 function getAllowedOrigins(): string[] {
