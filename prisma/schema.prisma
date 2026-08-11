@@ -5,9 +5,9 @@ generator client {
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
-  // Neon pooler + Prisma: DATABASE_URL pooler (Prisma Client uchun),
-  // DIRECT_URL to'g'ridan-to'g'ri ulanish (db push / migrate uchun)
-  directUrl = env("DIRECT_URL")
+  // Neon pooler URL (DATABASE_URL) DDL ham, transaction ham qo'llab-quvvatlaydi
+  // (jonli testda tasdiqlangan) — shuning uchun DIRECT_URL shart emas.
+  // Vercel build da faqat DATABASE_URL yetarli (bitta env, kam xato).
 }
 
 model University {
