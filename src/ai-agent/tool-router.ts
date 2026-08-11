@@ -4,6 +4,7 @@ import { lookupManager } from "@/data/lookups";
 import { externalApi } from "@/lib/external-api";
 import { embeddingService } from "./embedding-service";
 import { detectDirectionCategory } from "./direction-synonyms";
+import { detectExactDirection, normalizeDirectionName } from "./exact-direction";
 import { getIntentHandler } from "./intent-config";
 import { normalizeUserText } from "./text-normalizer";
 
@@ -1281,6 +1282,20 @@ export class ToolRouter {
         }
       }
 
+      // STAGE 14 — EXACT DIRECTION RESOLUTION:
+      // "davolash ishiga" kabi ANIQ yo'nalish so'rovi "tibbiyot" kategoriyasi
+      // sifatida kengaytirilmasligi kerak (RULE 1). Foydalanuvchi xabari (asl,
+      // follow-up konteksti qo'shilgan emas) ichidan aniq nom ajratib olinadi.
+      // "tibbiyotga qiziqaman" → exact=null (kategoriya), "davolash ishiga" →
+      // exact="davolash ishi". exact bo'lsa FAQAT shu nomdagi yo'nalishlar
+      // qidiriladi (farmatsiya/pediatriya qo'shilmaydi — RULE 3).
+      const exactDirection = detectExactDirection(userMessage || '');
+      if (exactDirection) {
+        console.log(`[ExactDirection] "${exactDirection}" aniq yo'nalish — kategoriya kengaytirilmaydi`);
+        // Aniq nom kalit so'zga aylanadi (kategoriya terminlari emas)
+        searchKeyword = exactDirection;
+      }
+
       // 2.5 MUHIM GUARD: kalit so'z ham, aniq universitet ham bo'lmasa —
       // 60 ta API call qilib bo'sh natija qaytarish o'rniga DARHOL bo'sh qaytaramiz.
       // "qanday yo'nalishlar mavjud" kabi katalog so'rovlar endi direction_list
@@ -1336,7 +1351,13 @@ export class ToolRouter {
       // 4. Kalit so'zni KENGAYTIRIB, barcha aloqador terminlar bo'yicha mos yo'nalishlarni topish
       // "tibbiyot" desa → tibbiyot, stomatolog, farmatsevtika, davolash, pediatriya...
       // "IT" desa → sun'iy intellekt, dasturlash, kiberxavfsizlik, kompyuter fan...
-      const expandedTerms = searchKeyword ? this.expandSearchKeyword(searchKeyword) : [];
+      // STAGE 14 (RULE 1): EXACT direction bo'lsa — kengaytirilmaydi, faqat shu
+      // nom bilan taqqoslanadi ("davolash ishi" → faqat "davolash ishi",
+      // farmatsiya/pediatriya qo'shilmaydi).
+      const exactMode = exactDirection !== null;
+      const expandedTerms = exactMode
+        ? [normalizeDirectionName(exactDirection)]
+        : searchKeyword ? this.expandSearchKeyword(searchKeyword) : [];
 
       const matches: any[] = [];
       const userSideCache = new Map<number, any>();
@@ -1373,6 +1394,15 @@ export class ToolRouter {
                 }
               }
               if (usedTerm) {
+                // STAGE 14 (RULE 3): exact rejimda faqat NOMI AYNAN shu yo'nalish
+                // bo'lgan matchlar qabul qilinadi (substring match ham, lekin
+                // boshqa nomlar — farmatsiya — kirmaydi).
+                if (exactMode) {
+                  const normUz = normalizeDirectionName(nameUz);
+                  const normEn = normalizeDirectionName(nameEn);
+                  const isExact = normUz === expandedTerms[0] || normEn === expandedTerms[0];
+                  if (!isExact) continue;
+                }
                 matches.push({
                   id: d.id,
                   nameUz: d.name_uz,
@@ -1522,11 +1552,17 @@ export class ToolRouter {
       // bor IT univlar (TATU kabi) chiqib ketmasligi uchun. Major-density
       // qoidasi recommend'dagi bilan bir xil — natijalar izchil bo'ladi.
       const searchCategory = searchKeyword ? detectDirectionCategory(searchKeyword) : undefined;
-      if (searchCategory && candidateIds.length > 0) {
+      // STAGE 14 (RULE 3): exact rejimda validator o'tkazib yuboriladi — matnning
+      // o'zi allaqachon ANIQ moslikni ta'minlagan ("Davolash ishi" nomi bilan
+      // farmatsiya kirmaydi). Validator (major-density %) boshqa yo'nalishlarni
+      // aralashtirganda kerak — exact'da emas.
+      if (!exactMode && searchCategory && candidateIds.length > 0) {
         const validated = this.validateDirectionResults(candidateIds, matches, searchCategory, totalDirsByUni);
         console.log(`[Validator] "${searchCategory}": ${candidateIds.length} ta → ${validated.ids.length} ta mos`);
         candidateIds = validated.ids;
         totalMatches = validated.total;
+      } else if (exactMode) {
+        console.log(`[ExactDirection] Validator o'tkazib yuborildi (exact match)`);
       }
 
       // DIRECTION DETAIL (BOSQICH 14 — Query Resolver): user yo'nalishning O'ZI
@@ -1658,17 +1694,20 @@ export class ToolRouter {
       // bor?"). Keyingi follow-up so'rovlar shu yo'nalishga bog'lanadi.
       // REVIEWER FIX: kategoriyaga map bo'lmagan aniq yo'nalishlar ham
       // (intent.entities.direction) eslab qolinadi.
-      const lastDirCategory = searchCategory || intent.entities?.direction;
-      if (sessionContext && lastDirCategory) {
+      // STAGE 14: exact rejimda ANIQ NOM saqlanadi ("davolash ishi"),
+      // kategoriya rejimida kategoriya ("tibbiyot").
+      const lastDirName = exactDirection || searchCategory || intent.entities?.direction;
+      if (sessionContext && lastDirName) {
         sessionContext.lastDirection = {
-          name: lastDirCategory,
-          category: lastDirCategory,
+          name: lastDirName,
+          category: searchCategory || lastDirName,
         };
-        console.log(`[Direction] lastDirection → "${lastDirCategory}"`);
+        console.log(`[Direction] lastDirection → "${lastDirName}"`);
       }
 
       const dirPhrase =
         (intent.entities?.directionPhrase as string | undefined) ||
+        exactDirection ||
         (searchCategory ? this.directionCategoryLabel(searchCategory) : undefined);
 
       return {
@@ -1684,6 +1723,9 @@ export class ToolRouter {
           directionDetail: directionDetailOnly || undefined,
           directionPhrase: directionDetailOnly ? dirPhrase : undefined,
           directionCategory: searchCategory,
+          // STAGE 14: aniq yo'nalish nomi ("davolash ishi") — formatter sarlavha
+          // sifatida ishlatadi ("🎓 Davolash ishi yo'nalishi").
+          exactDirection: exactDirection || undefined,
         },
       };
     } catch (error) {
@@ -2280,6 +2322,7 @@ export class ToolRouter {
         wantsForeign?: boolean;       // xorijga ketmoqchi
         weaknesses?: string[];        // zaif fanlar ("matematika") — Reasoning v2
         careerGoal?: string;          // YANGI: "ai_medicine", "medicine"
+        admissionFailed?: boolean;    // STAGE 14: "imtihondan yiqildim" → xususiy univlar ustun
       } = {};
 
       // Intent entities dan olish
@@ -2313,6 +2356,13 @@ export class ToolRouter {
       if (entities.englishLevel) preferences.englishLevel = entities.englishLevel;
       if (entities.wantsInternational) preferences.wantsInternational = true;
       if (entities.careerGoal) preferences.careerGoal = entities.careerGoal;
+      // STAGE 14 — USER STATE: "imtihondan yiqildim" → xususiy univlar ustun.
+      // USTOVORLIK (user qoidasi): explicit institutionCategory so'rovidan keyin
+      // keladi — user "davlat universiteti" desa, admissionFailed HECh qanday
+      // private-first qilmaydi (quyida scoring'da explicit tekshiriladi).
+      if (sessionContext?.recommendationProfile?.admissionFailed) {
+        preferences.admissionFailed = true;
+      }
 
       // Session context dan olish
       if (sessionContext) {
@@ -2878,6 +2928,23 @@ export class ToolRouter {
       }
     } else {
       budget = 12;
+    }
+
+    // STAGE 14 — USER STATE (admission_failed): foydalanuvchi imtihondan
+    // yiqilgan bo'lsa, XUSUSIY universitetlar ustun chiqadi (davlat emas) —
+    // ularning qabuli ochiq, hujjat yig'ish imkoniyati yuqori.
+    // MUHIM (user qoidasi): user EXPLICIT davlat/xususiy so'ragan bo'lsa
+    // (institutionCategory set), bu bonus qo'llanilmaydi — explicit > inference.
+    const uniCat = uni.institutionCategory || (uni.institution_category_id?.toString());
+    const hasExplicitCategory = !!(preferences.institutionCategory || preferences.institutionCategories?.length);
+    if (preferences.admissionFailed && !hasExplicitCategory) {
+      if (uniCat === "4") {
+        bonus += 6;
+        reasons.push("Imtihondan o'ta olmagan vaziyatda xususiy universitet — qabul imkoniyati yuqori");
+      } else if (uniCat === "3") {
+        bonus -= 4;
+        nuances.push("Davlat universiteti — imtihon talab qilishi mumkin");
+      }
     }
 
     // 4. Bonuslar (15 bal)

@@ -339,6 +339,13 @@ export interface SessionContext {
     wantsHostel?: boolean;         // YANGI: yotoqxona kerak
     wantsInternational?: boolean;  // YANGI: xalqaro diplom kerak
     careerGoal?: string;           // YANGI: "ai_medicine", "medicine", "software_dev"
+    /**
+     * STAGE 14 — USER STATE: foydalanuvchi qabuldan o'ta olmaganligi
+     * ("imtihondan yiqildim", "o'qishga kira olmadim", "ballim yetmadi").
+     * Recommendation: xususiy universitetlar birinchi o'ringa chiqadi (davlat
+     * EMAS) — user explicit ravishda davlat so'ramasa (explicit > inference).
+     */
+    admissionFailed?: boolean;
   };
   /**
    * RECOMMENDATION MEMORY (BOSQICH 9): oxirgi tavsiya qilingan universitetlar.

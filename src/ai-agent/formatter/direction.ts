@@ -86,8 +86,16 @@ export function formatDirectionSearch(firstResult: any, message: string): string
 
   if (uniList.length > 0) {
     const totalMatches = directionsData.totalMatches ?? uniList.length;
-    let response = "### 🎓 Sizga mos universitetlar\n\n";
-    response += `"${message}" so'roviga mos **${totalMatches} ta** universitetda yo'nalish topildi! 🎉\n\n`;
+    // STAGE 14 — EXACT DIRECTION: "davolash ishi" kabi aniq yo'nalish so'ralganda
+    // sarlavha aniq nomni ko'rsatadi ("Sizga mos universitetlar" emas) va
+    // "so'rovga mos" iborasi ishlatilmaydi — natija FAQAT shu yo'nalish uchun.
+    const exactDir = firstResult.data?.exactDirection;
+    let response = exactDir
+      ? `### 🎓 "${exactDir}" yo'nalishi\n\n`
+      : "### 🎓 Sizga mos universitetlar\n\n";
+    response += exactDir
+      ? `Ushbu yo'nalish **${totalMatches} ta** universitetda mavjud! 🎉\n\n`
+      : `"${message}" so'roviga mos **${totalMatches} ta** universitetda yo'nalish topildi! 🎉\n\n`;
 
     uniList.slice(0, 8).forEach((uni: any, i: number) => {
       response += `---\n\n`;

@@ -34,6 +34,19 @@ export interface FollowUpResult {
 }
 
 /**
+ * STAGE 14 — USER STATE EXTRACTOR:
+ * Foydalanuvchi qabuldan o'ta olmaganini bildiruvchi iboralar aniqlanadi:
+ *   "imtihondan yiqildim", "o'qishga kira olmadim", "ballim yetmadi",
+ *   "grantga kira olmadim", "qabuldan o'ta olmadim"...
+ * Bu context session bo'ylab saqlanadi (recommendationProfile.admissionFailed)
+ * va keyingi tavsiyalarda XUSUSIY universitetlar birinchi o'ringa chiqadi.
+ */
+export function extractAdmissionFailed(message: string): boolean {
+  if (!message) return false;
+  return /\b(?:imtihon(?:dan)?\s+(?:yiqildim|y?iqilib|o\'ta\s+olmadim|o\'tolmadim)|o\'qishga\s+(?:kira\s+olmadim|kira\s+olmadim|kirmadim|kirmaganman)|qabul(?:dan)?\s+(?:o\'ta\s+olmadim|o\'tolmadim|yutqazdim)|ball(?:im|im)?\s+(?:yetmadi|yetmayapti|yetmaydi)|grant(?:ga)?\s+(?:kira\s+olmadim|ololmadim|yutolmaganman)|kvota(?:ga)?\s+(?:kira\s+olmadim|tushmadim|olmaganman)|o\'qishga\s+olishmadi|qabul\s+qilmadi|kirmadim\s+o\'qishga|yiqildim)\b/i.test(message);
+}
+
+/**
  * O'z-o'zidan to'liq bo'lgan (yangi mavzu ochuvchi) so'rovlar follow-up ga qo'shilmaydi.
  * BOSQICH 4 (JSON-driven config): ro'yxat intent-config.json dagi
  * selfComplete=true flag'idan o'qiladi — kodga tegmasdan boshqariladi.
@@ -121,6 +134,15 @@ export function updateRecommendationProfile(
   // Xorijga ketish niyati: "xorijda ishlash"
   if (/\b(xorijga ketmoqchi|chet\s*elda\s+ishlash|abroad|xorijiy|xorijda)\b/i.test(userMessage)) {
     profile.wantsForeign = true;
+  }
+
+  // STAGE 14 — USER STATE: "imtihondan yiqildim", "o'qishga kira olmadim",
+  // "ballim yetmadi" → admissionFailed=true. Keyingi tavsiyalar xususiy
+  // univlarni birinchi o'ringa chiqaradi (davlat emas) — user explicit
+  // ravishda davlat so'ramasa (explicit request > avtomatik inference).
+  if (extractAdmissionFailed(userMessage)) {
+    profile.admissionFailed = true;
+    console.log(`[UserState] admissionFailed=true ("${userMessage.substring(0, 60)}")`);
   }
 
   // Region: entities'dan kelgan region → home city
