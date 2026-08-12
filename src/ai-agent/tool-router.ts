@@ -2332,6 +2332,7 @@ export class ToolRouter {
         weaknesses?: string[];        // zaif fanlar ("matematika") — Reasoning v2
         careerGoal?: string;          // YANGI: "ai_medicine", "medicine"
         admissionFailed?: boolean;    // STAGE 14: "imtihondan yiqildim" → xususiy univlar ustun
+        privateFirst?: boolean;       // STAGE 14d: admissionFailed + explicit kategoriya yo'q → private-first marker
       } = {};
 
       // Intent entities dan olish
@@ -2469,7 +2470,24 @@ export class ToolRouter {
       const missing: string[] = [];
       if (!preferences.region) missing.push("region");
       if (!preferences.directionCategory) missing.push("directionCategory");
-      if (!preferences.institutionCategory && !preferences.institutionCategories?.length) missing.push("institutionCategory");
+      // STAGE 14d (user qoidasi): imtihondan yiqilgan foydalanuvchidan
+      // "davlatmi yoki xususiymi?" deb SO'RALMAYDI — vaziyatning o'zi javob:
+      // private-first strategiya avtomatik qo'llaniladi (scoring xususiy/xalqaroni
+      // yuqoriga chiqaradi, davlat butunlay chiqib ketmaydi). User keyinroq
+      // "davlat universitetlarini ham ko'rsat" desa — explicit talab ustun keladi.
+      const admissionFailedNoCategory =
+        preferences.admissionFailed === true &&
+        !preferences.institutionCategory &&
+        !preferences.institutionCategories?.length;
+      if (!preferences.institutionCategory && !preferences.institutionCategories?.length && !admissionFailedNoCategory) {
+        missing.push("institutionCategory");
+      }
+      // private-first marker — tool result va LLM context uchun ko'rinadigan
+      // bo'ladi (nima uchun xususiy/xalqaro ustuvor ekani aniq ko'rsatiladi).
+      if (admissionFailedNoCategory) {
+        preferences.privateFirst = true;
+        console.log("[Recommend] admissionFailed + kategoriya yo'q → private-first strategiya (clarification o'tkazib yuborildi)");
+      }
 
       // Fix 16: foydalanuvchi "bilmadim" desa cheksiz savol so'ramaymiz —
       // unga yo'nalishlar ro'yxatini taklif qilamiz (katalog) yoki yordam beramiz.
@@ -2944,23 +2962,37 @@ export class ToolRouter {
     // ularning qabuli ochiq, hujjat yig'ish imkoniyati yuqori.
     // MUHIM (user qoidasi): user EXPLICIT davlat/xususiy so'ragan bo'lsa
     // (institutionCategory set), bu bonus qo'llanilmaydi — explicit > inference.
-    const uniCat = uni.institutionCategory || (uni.institution_category_id?.toString());
+    // STAGE 14d FIX (bonus=0 bug'i): normalize qilingan univda institutionCategory
+    // NOM bo'ladi ("Davlat universiteti"), institution_category_id esa camelCase
+    // institutionCategoryId ga aylanadi — eski kod faqat ID ("3"/"4"/"5") kutardi
+    // va hech qachon mos kelmasdi (admissionFailed bonus/penalty umuman qo'llanilmasdi).
+    // Endi ID ham, NOM ham tekshiriladi — har ikkala formatda ham ishlaydi.
+    const catName = (uni.institutionCategory || uni.institutionType || "").toLowerCase();
+    const catId = String(uni.institutionCategoryId ?? uni.institution_category_id ?? "");
+    const isPrivateUni = catId === "4" || /xususiy/.test(catName);
+    const isInternationalUni = catId === "5" || /xalqaro/.test(catName);
+    const isStateUni = catId === "3" || /davlat/.test(catName);
     const hasExplicitCategory = !!(preferences.institutionCategory || preferences.institutionCategories?.length);
     if (preferences.admissionFailed && !hasExplicitCategory) {
-      if (uniCat === "4" || uniCat === "5") {
-        bonus += 8;
-        reasons.push("Imtihondan o'ta olmagan vaziyatda xususiy/xalqaro universitet — qabul imkoniyati yuqori");
-      } else if (uniCat === "3") {
-        bonus -= 6;
+      // STAGE 14d (user qoidasi — KUCHLI signal): imtihondan yiqilgan user uchun
+      // xususiy/xalqaro ustuvor bo'lishi KERAK ("yiqilgan bo'lsa xususiy taqdim
+      // qiladi"). Vazn: xususiy +20, xalqaro +16, davlat -12, qabul ochiq +6.
+      // Davlat butunlay YO'QOLMAYDI — ro'yxatda pastroqda qoladi (user keyinroq
+      // "davlat ko'rsat" desa explicit talab ustun keladi).
+      if (isPrivateUni) {
+        bonus += 20;
+        reasons.push("Imtihondan o'ta olmagan vaziyatda xususiy universitet — qabul imkoniyati yuqori");
+      } else if (isInternationalUni) {
+        bonus += 16;
+        reasons.push("Imtihondan o'ta olmagan vaziyatda xalqaro universitet — qabul imkoniyati yuqori");
+      } else if (isStateUni) {
+        bonus -= 12;
         nuances.push("Davlat universiteti — imtihon talab qilishi mumkin");
       }
-      // STAGE 14d (soft scoring — user qoidasi): qabul HOZIR OCHIQ bo'lgan
-      // universitet kategoriyadan qat'iy nazar bonus oladi ("imtihonsiz qabul").
-      // Davlat universiteti butunlay YO'QOLMAYDI — faqat pastroq ball oladi,
-      // xususiy/xalqaro yuqoriga chiqadi.
+      // "imtihonsiz qabul" (isOpenForAdmission): kategoriyadan qat'iy nazar bonus.
       const isAdmissionOpen = uni.isOpenForAdmission === true || uni.is_open_for_admission === true;
       if (isAdmissionOpen) {
-        bonus += 5;
+        bonus += 6;
         reasons.push("Qabul hozir ochiq — imtihonsiz hujjat topshirish imkoniyati");
       }
     }
@@ -2977,7 +3009,7 @@ export class ToolRouter {
       nuances.push("Yotoqxona mavjudligi ko'rsatilmagan");
     }
 
-    if (preferences.wantsInternational && (uni.institutionCategory === "5" || /xalqaro|international|double degree/i.test(uni.fullNameUz || ""))) {
+    if (preferences.wantsInternational && (isInternationalUni || /international|double degree/i.test(uni.fullNameUz || ""))) {
       bonus += 5;
       reasons.push("Xalqaro status / diplom berish imkoniyati yuqori");
     }
