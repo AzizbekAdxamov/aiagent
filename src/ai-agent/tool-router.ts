@@ -2744,7 +2744,17 @@ export class ToolRouter {
               uniStrongCounts.set(uni.id, strongCount);
               const catShare = strongCount / Math.max(totalDirs, 1);
               const rule = this.getMajorDensityRule(preferences.directionCategory);
-              const passesMajor = (strongCount >= rule.minStrong && catShare >= rule.minShare) || catShare >= rule.orShare;
+              // STAGE 14f (user qoidasi): private-first rejimda xususiy/xalqaro
+              // univlar uchun major-density yumshatiladi — kamida 1 ta ANIQ
+              // yo'nalish yetarli (kirish imkoniyati ustuvor: kichik xususiy
+              // institutda 3 ta yo'nalish bo'lsa ham uni ko'rsatish kerak).
+              // Davlat univlari qattiq qoida bilan qoladi (imtihon talabi).
+              const rawCatId = String(uni.institution_category_id ?? uni.institutionCategoryId ?? "");
+              const isPrivateOrIntl = rawCatId === "4" || rawCatId === "5" ||
+                /xususiy|xalqaro/i.test(String(uni.institutionCategory || uni.institution_type || ""));
+              const passesMajor = preferences.privateFirst === true && isPrivateOrIntl
+                ? strongCount >= 1
+                : (strongCount >= rule.minStrong && catShare >= rule.minShare) || catShare >= rule.orShare;
               const catLabel = preferences.directionCategory === 'it' ? 'IT' : (preferences.directionCategory || 'soha');
               console.log(`[Recommend] Major-density: ${(uni.full_name_uz || uni.full_name_en || '').substring(0, 45)} — ${strongCount} ta aniq ${catLabel} yo'nalish, ${totalDirs} jami (ulush ${Math.round(catShare * 100)}%) → ${passesMajor ? "O'TDI" : "chiqarildi"}`);
               if (passesMajor) dirMatchedUniIds.add(uni.id);

@@ -609,6 +609,16 @@ class ProviderManager {
             if (filteredLlm.educationType !== undefined && !ruleBased.educationType && !explicitETWord) {
               delete filteredLlm.educationType;
             }
+            // STAGE 14f (user qoidasi): region/shahar/byudjet — STRUKTURAVIY
+            // entity'lar, LLM authoritative EMAS. Rule extractor aniq ajratadi
+            // ("toshkent shahri"→14 vs "Toshkent viloyati"→11); LLM xato qilib
+            // noto'g'ri qiymat qo'shishi mumkin (logda ko'rindi: LLM
+            // {"region":"11"} vs rule {"region":"14"}). Bular faqat rule-based
+            // orqali aniqlanadi — LLM faqat direction/degree/language uchun fallback.
+            delete filteredLlm.region;
+            delete filteredLlm.preferredCities;
+            delete filteredLlm.tuitionMax;
+            delete filteredLlm.tuitionMin;
             intent.entities = { ...filteredLlm, ...ruleBased };
             console.log(`[LLM Entities] rule=${JSON.stringify(ruleBased)} llm=${JSON.stringify(llmEntities)} merged=${JSON.stringify(intent.entities)}`);
           }
@@ -684,6 +694,29 @@ class ProviderManager {
       // yo'nalish? Davlatmi yoki xususiy?") — keyingi javobga asos bo'ladi.
       const needsClarification = toolResults.some((r: any) => r.data?.needsClarification === true);
       if (needsClarification) {
+        // STAGE 14f (user qoidasi): user vaziyati yig'ilgan bo'lsa (admissionFailed /
+        // wantsToStudy / profil), clarification'ni LLM TABIIY TILDA so'raydi —
+        // "Tushundim. Siz imtihondan o'ta olmaganingizni aytdingiz... avvalo xususiy
+        // universitetlarni ko'rib chiqishni tavsiya qilaman. Qaysi shaharda
+        // o'qimoqchisiz?" kabi (situatsiya bloki bilan). Quruq template savoli EMAS.
+        // Guest → template (token tejaladi); LLM xato bo'lsa → template fallback.
+        const hasSituation = this.buildUserSituationBlock(sessionContext) !== null;
+        if (hasSituation && this.initialized && sessionContext?.isGuest !== true) {
+          const hybridResult = await this.tryHybridResponse(intent, toolResults, conversationHistory, userMessage, language, sessionContext);
+          // Reviewer fix: LLM javobi savol ko'rinishida EMAS bo'lsa (masalan
+          // "Toshkent eng yaxshi variant") — template fallback (noto'g'ri javob
+          // userga bormasin). Faqat LLM xatosi emas, sifatsiz javob ham fallback.
+          if (hybridResult !== null && /[?؟]|qaysi|qanday|qanaqa|necha\b|so'ray|so'rayman|bering|ayting|aytib bering/i.test(hybridResult.content)) {
+            console.log(`[DEBUG] Situational clarification via LLM (${hybridResult.provider})`);
+            return {
+              content: hybridResult.content,
+              intent: intent.intent,
+              toolUsed: toolResults.length > 0 ? toolResults.map((r: any) => r.tool).filter(Boolean).join(", ") : "none",
+              provider: hybridResult.provider,
+            };
+          }
+          console.log(`[DEBUG] LLM clarification savol emas yoki xato — template fallback`);
+        }
         const content = this.getTemplateResponse(intent.intent, toolResults, userMessage, language, intent.entities, intent.entityConfidence);
         console.log(`[DEBUG] needsClarification=true — template clarification savollari ishlatiladi`);
         return {

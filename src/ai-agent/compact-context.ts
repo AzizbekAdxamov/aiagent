@@ -115,7 +115,13 @@ export function buildCompactContext(toolResults: ToolResult[]): string {
       case "recommend": {
         const d = result.data;
         if (d?.needsClarification) {
-          parts.push(`Tavsiya uchun etarli ma'lumot yo'q. Yetishmayotgan: ${(d.preferences?.missing || []).join(", ") || "ma'lumot"}`);
+          const missing = (d.preferences?.missing || []).join(", ") || "ma'lumot";
+          parts.push(`Foydalanuvchi tavsiya so'ramoqda — YETISHMAYOTGAN ma'lumot: ${missing}`);
+          const known = d.preferences?.known || {};
+          if (Object.keys(known).length > 0) {
+            parts.push(`Ma'lum bo'lganlar: ${JSON.stringify(known)}`);
+          }
+          parts.push("INSTRUCTION: Foydalanuvchiga FAQAT BIRINCHI yetishmayotgan ma'lumotni tabiiy tilda bitta savol qilib bering. Navbat: 1) region → 'Qaysi shahar yoki viloyatda o'qimoqchisiz?', 2) directionCategory → 'Qanday yo'nalish sizni qiziqtiradi?', 3) institutionCategory → davlat/xususiy — lekin foydalanuvchi imtihondan yiqilgan bo'lsa (vaziyat blokida admission_failed) buni SO'RAMANG, xususiy/xalqaro ustuvorligini taklif qiling. Agar vaziyat bloki bo'lsa, avval vaziyatni 1-2 gapda tan oling, keyin bitta savol bering.");
         } else if (Array.isArray(d?.recommendations) && d.recommendations.length > 0) {
           const bestId = d.bestUniversity?.id;
           parts.push(`Tavsiyalar (${d.recommendations.length} ta, backend ball bilan saralangan):`);
