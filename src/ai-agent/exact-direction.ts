@@ -118,6 +118,27 @@ export const EXACT_DIRECTION_NAMES: string[] = [
   "sport menejmenti",
 ];
 
+/**
+ * KASB SO'ZLARI → ANIQ YO'NALISH (STAGE 14d):
+ * "doktor bo'lishni xohlayman" → "Davolash ishi" (kategoriya "tibbiyot" EMAS).
+ * Aks holda "doktor" → "tibbiyot" kategoriyasiga kengayib, farmatsiya/pediatriya
+ * kabi BOShQA yo'nalishlar ham natijaga qo'shilib ketardi (user qoidasi:
+ * exact direction topilsa → category search STOP).
+ *
+ * MUHIM: word-boundary regex — "doktorantura" (doktor+antura) va "doktorlik"
+ * (doktor+lik) bularga mos KELMAYDI (akademik daraja ≠ shifokor kasbi).
+ */
+// Konventsiya: EXACT_DIRECTION_NAMES dagi kabi KICHIK HARF bilan qaytariladi
+// (tool-router normalizeDirectionName orqali solishtiradi — holat muhim emas).
+const CAREER_TO_EXACT_DIRECTION: Array<{ pattern: RegExp; direction: string }> = [
+  { pattern: /\b(doktor|shifokor|vrach|doctor)\b/i, direction: "davolash ishi" },
+  { pattern: /\bstomatolog\b/i, direction: "stomatologiya" },
+  { pattern: /\bfarmatsevt\b/i, direction: "farmatsiya" },
+  { pattern: /\bjarroh\b/i, direction: "jarrohlik" },
+  { pattern: /\bhamshira\b/i, direction: "hamshiralik ishi" },
+  { pattern: /\bpediatr\b/i, direction: "pediatriya" },
+];
+
 /** Matnni taqqoslash uchun normalizatsiya (apostrof, kichik harf, qo'shimcha bo'shliqlar) */
 export function normalizeDirectionName(name: string): string {
   return name
@@ -162,6 +183,19 @@ export function detectExactDirection(message: string): string | null {
     // Kategoriya umumiy so'zi bilan birga kelsa ham exact ishlaydi
     // ("tibbiyot davolash ishi" → davolash ishi aniqroq)
     return bestMatch;
+  }
+
+  // KASB SO'ZI (STAGE 14d): "doktor bo'lishni xohlayman" → "Davolash ishi".
+  // GUARD: akademik daraja iboralari bilan birga kelsa qo'llanilmaydi —
+  // u yerda "doktor" shifokor kasbi emas, doktoranturani anglatadi.
+  const academicDegreeWord =
+    /\b(doktorantura|doktoranturada|phd|doctor of science|doctor of philosophy|ilmiy daraja|akademik daraja|doktorlik)\b/i.test(normalized);
+  if (!academicDegreeWord) {
+    for (const { pattern, direction } of CAREER_TO_EXACT_DIRECTION) {
+      if (pattern.test(normalized)) {
+        return direction;
+      }
+    }
   }
 
   return null;

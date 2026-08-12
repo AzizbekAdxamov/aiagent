@@ -27,6 +27,18 @@ check("IT ga qiziqaman", detectExactDirection("IT ga qiziqaman"), null); // kate
 check("has: davolash ishi", hasExactDirection("davolash ishi qayerda bor"), true);
 check("has: tibbiyot", hasExactDirection("tibbiyot"), false);
 
+console.log("\n=== CAREER → EXACT DIRECTION (STAGE 14d) ===");
+check("doktor bo'lishni xohlayman", detectExactDirection("men doktor bo'lishni xohlayman"), "davolash ishi");
+check("doktor bo'lishni orzu qilaman", detectExactDirection("men yoshligimdan doktor bo'lishni orzu qilaman"), "davolash ishi");
+check("shifokor bo'lmoqchiman", detectExactDirection("shifokor bo'lmoqchiman, Toshkentda yashayman"), "davolash ishi");
+check("vrach", detectExactDirection("vrach bo'lmoqchiman"), "davolash ishi");
+check("stomatolog bo'lmoqchiman", detectExactDirection("stomatolog bo'lmoqchiman"), "stomatologiya");
+check("farmatsevt bo'lishni xohlayman", detectExactDirection("farmatsevt bo'lishni xohlayman"), "farmatsiya");
+check("jarroh bo'lmoqchiman", detectExactDirection("jarroh bo'lmoqchiman"), "jarrohlik");
+check("doktorantura → EMAS", detectExactDirection("doktorantura o'qimoqchiman"), null);
+check("phd → EMAS", detectExactDirection("phd darajasini olishni xohlayman"), null);
+check("doktorlik → EMAS", detectExactDirection("doktorlik dissertatsiyasi himoya qilmoqchiman"), null);
+
 console.log("\n=== ADMISSION FAILED EXTRACTOR ===");
 check("imtihondan yiqildim", extractAdmissionFailed("men bu yil imtihondan yiqildim"), true);
 check("o'qishga kira olmadim", extractAdmissionFailed("o'qishga kira olmadim"), true);

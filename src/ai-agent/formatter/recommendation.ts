@@ -47,13 +47,13 @@ export function formatRecommend(firstResult: any, message: string): string {
   if (data?.needsClarification) {
     const missing = data.preferences?.missing || [];
     if (missing.length === 0) {
-      return "### 🎯 Sizga eng yaxshi variantni topaman!\n\nKeling, savolga javob bering, men sizga eng yaxshi variantlarni tavsiya qilaman! 😊";
+      return "### 🎯 Keling, sizga mos variantni birga topamiz!\n\nKeling, savolga javob bering, men sizga mos variantlarni topib beraman! 😊";
     }
 
     // Navbat: qaysi ma'lumot birinchi so'raladi (preferences.known ichida
     // allaqachon to'plangan ma'lumotlar ko'rsatilmaydi).
     const first = missing[0];
-    let response = "### 🎯 Sizga eng yaxshi variantni topaman!\n\n";
+    let response = "### 🎯 Keling, sizga mos variantni birga topamiz!\n\n";
     if (first === 'region') {
       response += "1️⃣ **Qaysi shahar yoki viloyatda o'qimoqchisiz?** (Toshkent, Samarqand, Buxoro...)\n\n";
     } else if (first === 'directionCategory') {
@@ -63,7 +63,7 @@ export function formatRecommend(firstResult: any, message: string): string {
       response += "3️⃣ **Davlatmi yoki xususiy universitetmi?**\n\n";
     }
 
-    response += "📌 **[Mentalaba.uz](https://mentalaba.uz/universities)** — barcha universitetlar\n\nJavob bering, men sizga eng yaxshi variantlarni tavsiya qilaman! 😊";
+    response += "📌 **[Mentalaba.uz](https://mentalaba.uz/universities)** — barcha universitetlar\n\nJavob bering, men sizga mos variantlarni topib beraman! 😊";
     return response;
   }
 
@@ -125,9 +125,9 @@ export function formatRecommend(firstResult: any, message: string): string {
       ? data.alternatives
       : (data.recommendations || []).slice(1);
 
-    let response = "### 🎯 Siz uchun eng mos universitet!\n\n";
+    let response = "### 🎯 Sizga mos variantlar!\n\n";
     if (prefLines.filter(Boolean).length > 0) {
-      response += `Sizning xohishingiz (${prefLines.filter(Boolean).join(', ')}) bo'yicha tavsiyalarni tahlil qildim. 👇\n\n`;
+      response += `Sizning xohishingiz (${prefLines.filter(Boolean).join(', ')}) va vaziyatingizni hisobga olib, quyidagi variantlarni tavsiya qilaman: 👇\n\n`;
     }
 
     // === ASOSIY JAVOB: eng yuqori ball olgan universitet ===
@@ -140,7 +140,7 @@ export function formatRecommend(firstResult: any, message: string): string {
     if (best.tuition && best.tuition !== 'N/A') response += `   💵 *${best.tuition}*\n`;
     const whyBest = buildWhyParts(best);
     if (whyBest.length > 0) {
-      response += `   ✅ *Nega aynan shu:* ${whyBest.join(', ')}\n`;
+      response += `   ✅ *Nega mos keladi:* ${whyBest.join(', ')}\n`;
     }
     if (best.score?.nuances?.length > 0) {
       response += `   ⚠️ *E'tibor berish kerak:* ${best.score.nuances.slice(0, 2).join('; ')}\n`;

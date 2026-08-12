@@ -125,7 +125,7 @@ export function buildCompactContext(toolResults: ToolResult[]): string {
             parts.push("MUHIM: Bu ro'yxat backend tomonidan filtrlangan va to'liq — o'zingizdan boshqa universitet qo'shmang.");
           }
           if (bestId !== undefined) {
-            parts.push("ASOSIY JAVOB: quyidagi birinchi (BEST) universitet — eng mos universitet. Faqat shu bitta universitetni asosiy tavsiya sifatida qat'iy ayting, qolganlari faqat alternativalar.");
+            parts.push("ASOSIY TAVSIYA: quyidagi birinchi (BEST) universitet — backend eng yuqori ball bergan (asosiy variant). Uni TAVSIYA sifatida taqdim eting (masalan: \"Sizning vaziyatingizni hisobga olsam, bu yaxshi variantlardan biri bo'lishi mumkin\"), qolganlari faqat alternativalar.");
           }
           d.recommendations.slice(0, 6).forEach((uni: any, i: number) => {
             const isBest = bestId !== undefined && uni.id === bestId;
@@ -136,7 +136,7 @@ export function buildCompactContext(toolResults: ToolResult[]): string {
               const weakNote = uni.score.breakdown?.weakness > 0
                 ? `, zaif fan chegirmasi -${uni.score.breakdown.weakness}`
                 : '';
-              parts.push(`${compact}${isBest ? " [BEST — ENG MOS, asosiy javob]" : ""}\n   Ball: ${uni.score.total}/100 (yo'nalish ${uni.score.breakdown?.direction || 0}, byudjet ${uni.score.breakdown?.budget || 0}, hudud ${uni.score.breakdown?.region || 0}, bonus ${uni.score.breakdown?.bonus || 0}${weakNote})`);
+              parts.push(`${compact}${isBest ? " [BEST — eng yuqori ball, asosiy variant]" : ""}\n   Ball: ${uni.score.total}/100 (yo'nalish ${uni.score.breakdown?.direction || 0}, byudjet ${uni.score.breakdown?.budget || 0}, hudud ${uni.score.breakdown?.region || 0}, bonus ${uni.score.breakdown?.bonus || 0}${weakNote})`);
               // Fix (nega aynan shu): backend hisoblagan sabablarni ham LLM'ga
               // beramiz — LLM ularni izohlab, "nega aynan shu universitet"
               // degan savolga faktlar bilan javob bera oladi.
@@ -147,7 +147,7 @@ export function buildCompactContext(toolResults: ToolResult[]): string {
                 parts.push(`   E'tibor: ${uni.score.nuances.slice(0, 2).join("; ")}`);
               }
             } else {
-              parts.push(`${compact}${isBest ? " [BEST — ENG MOS, asosiy javob]" : ""}`);
+              parts.push(`${compact}${isBest ? " [BEST — eng yuqori ball, asosiy variant]" : ""}`);
             }
           });
         }

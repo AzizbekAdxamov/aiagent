@@ -11,6 +11,7 @@ import { buildEntityExtractionPrompt, parseEntitiesJSON } from "./llm-entity-ext
 import { responseBuilder } from "./formatter";
 import { detectRequestField, isBareFieldRequest, requestFieldLabel } from "./request-field";
 import { resolveQuery } from "./query-resolver";
+import { normalizeUserText } from "./text-normalizer";
 import { universityClarificationResponse } from "./formatter/common";
 import { buildCompactContext } from "./compact-context";
 import { buildSnapshotHistory } from "./compact-history";
@@ -548,11 +549,23 @@ class ProviderManager {
       // MUHIM: faqat direction_search intent uchun va message da kasb/istek/maqsad
       // so'zlari bo'lsa. Negativ: "yo'nalish(lar)i", "ro'yxati", "mavjud" kabi
       // katalog so'zlari bo'lsa — template qoladi.
+      // STAGE 14d (apostrof/typo tolerant): "bolmoqchiman" → "bo'lmoqchiman"
+      const strategyMsg = normalizeUserText(effectiveMessage).replace(/[’‘`]/g, "'");
       if (intent.intent === "direction_search" &&
-          /\b(bo'lmoqchiman|ishlamoqchiman|qiziqaman|qiziqtiradi|yoqadi|yaxshi ko'raman|o'qimoqchiman|o'rganmoqchiman|kirmoqchiman|maqsadim|orzuim)\b/i.test(effectiveMessage) &&
-          !/\b(yo'nalish(?:lar|lari|larini|lariga|laridan|larining)?|ro'yxati|mavjud|katalogi)\b/i.test(effectiveMessage)) {
+          /\b(bo'lmoqchiman|ishlamoqchiman|qiziqaman|qiziqtiradi|yoqadi|yaxshi ko'raman|o'qimoqchiman|o'rganmoqchiman|kirmoqchiman|maqsadim|orzuim|orzu qilaman|xohlayman|xohlayapman)\b/i.test(strategyMsg) &&
+          !/\b(yo'nalish(?:lar|lari|larini|lariga|laridan|larining)?|ro'yxati|mavjud|katalogi)\b/i.test(strategyMsg)) {
         responseStrategy = "hybrid";
         console.log(`[StrategyOverride] direction_search → hybrid (kasb/istek so'zi): "${effectiveMessage.substring(0, 60)}"`);
+      }
+
+      // STAGE 14d: direction_detail (exact yo'nalish ma'lumoti — "davolash ishi
+      // haqida ko'proq ma'lumot") → hybrid. Template quruq ro'yxat beradi; LLM
+      // esa vaziyat bloki bilan tabiiy tilda tushuntiradi (user qoidasi:
+      // "Exact direction search → LLM composer"). Data bo'lmasa hybrid null
+      // qaytaradi → template fallback (xavfsiz).
+      if (intent.entities?.queryType === "direction_detail" && responseStrategy === "template") {
+        responseStrategy = "hybrid";
+        console.log(`[StrategyOverride] direction_detail → hybrid: "${effectiveMessage.substring(0, 60)}"`);
       }
       const needsLlm = responseStrategy === "llm" || responseStrategy === "hybrid";
       // TODO (future): "hybrid" hozircha "llm" yo'nalishiga boradi (API data +

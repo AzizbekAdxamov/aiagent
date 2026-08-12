@@ -1400,7 +1400,16 @@ export class ToolRouter {
                 if (exactMode) {
                   const normUz = normalizeDirectionName(nameUz);
                   const normEn = normalizeDirectionName(nameEn);
-                  const isExact = normUz === expandedTerms[0] || normEn === expandedTerms[0];
+                  // STAGE 14d (reviewer fix): variant nomlar ham qabul qilinadi —
+                  // "Davolash ishi (ingliz tili)" → normalize → "davolash ishi
+                  // ingliz tili" strict equality'da TAShLAB yuborilardi (TTA kabi
+                  // asosiy univlar chiqib ketardi). Prefix bilan moslashtiramiz:
+                  // "farmatsiya"/"pediatriya" nomlari "davolash ishi " bilan
+                  // boshlanmagani uchun Stage 14b fix'i buzilmaydi.
+                  const exactTerm = expandedTerms[0];
+                  const isExact =
+                    normUz === exactTerm || normUz.startsWith(exactTerm + " ") ||
+                    normEn === exactTerm || normEn.startsWith(exactTerm + " ");
                   if (!isExact) continue;
                 }
                 matches.push({
@@ -2938,12 +2947,21 @@ export class ToolRouter {
     const uniCat = uni.institutionCategory || (uni.institution_category_id?.toString());
     const hasExplicitCategory = !!(preferences.institutionCategory || preferences.institutionCategories?.length);
     if (preferences.admissionFailed && !hasExplicitCategory) {
-      if (uniCat === "4") {
-        bonus += 6;
-        reasons.push("Imtihondan o'ta olmagan vaziyatda xususiy universitet — qabul imkoniyati yuqori");
+      if (uniCat === "4" || uniCat === "5") {
+        bonus += 8;
+        reasons.push("Imtihondan o'ta olmagan vaziyatda xususiy/xalqaro universitet — qabul imkoniyati yuqori");
       } else if (uniCat === "3") {
-        bonus -= 4;
+        bonus -= 6;
         nuances.push("Davlat universiteti — imtihon talab qilishi mumkin");
+      }
+      // STAGE 14d (soft scoring — user qoidasi): qabul HOZIR OCHIQ bo'lgan
+      // universitet kategoriyadan qat'iy nazar bonus oladi ("imtihonsiz qabul").
+      // Davlat universiteti butunlay YO'QOLMAYDI — faqat pastroq ball oladi,
+      // xususiy/xalqaro yuqoriga chiqadi.
+      const isAdmissionOpen = uni.isOpenForAdmission === true || uni.is_open_for_admission === true;
+      if (isAdmissionOpen) {
+        bonus += 5;
+        reasons.push("Qabul hozir ochiq — imtihonsiz hujjat topshirish imkoniyati");
       }
     }
 

@@ -50,7 +50,7 @@ Men sizga quyidagilarda yordam bera olaman:
 🏛 **Universitetlar** — davlat, xususiy va xalqaro universitetlar haqida to'liq ma'lumot
 📚 **Yo'nalishlar** — IT, tibbiyot, iqtisod, pedagogika va boshqa 50+ yo'nalish
 
-Qaysi yo'nalish sizni qiziqtiradi? Qayerda o'qimoqchisiz? Savolingizni yozing, men sizga eng yaxshi variantlarni topib beraman.`;
+Qaysi yo'nalish sizni qiziqtiradi? Qayerda o'qimoqchisiz? Savolingizni yozing, men sizga mos variantlarni topib beraman.`;
 }
 
 /** API/tool xatosi (401, timeout) uchun aniq javob — "topilmadi" bilan adashtirmaslik uchun */
@@ -270,7 +270,7 @@ Based on this, I'll recommend the best options for you! 🎯`;
 3️⃣ **Davlatmi yoki xususiy universitetmi?**
 4️⃣ **Grant qiziqtiradimi?**
 
-Shu ma'lumotlar asosida sizga eng yaxshi variantlarni tavsiya qilaman! 🎯`;
+Shu ma'lumotlar asosida sizga mos variantlarni tavsiya qilaman! 🎯`;
 }
 
 /**
