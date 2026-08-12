@@ -6,7 +6,11 @@ const url = process.env.DATABASE_URL || "";
 if (!url) {
   console.error(
     "❌ DATABASE_URL env topilmadi!\n" +
-      "   Vercel → Settings → Environment Variables → DATABASE_URL qo'shing."
+      "   Vercel → Settings → Environment Variables → 'Add New' →\n" +
+      "   Key: DATABASE_URL, Value: postgresql://...\n" +
+      "   MUHIM: Environments da 'Production' ni BELGILANG (Preview/Development yetarli emas —\n" +
+      "   production build aynan Production scope'idagi env'ni o'qiydi).\n" +
+      "   Save → Redeploy."
   );
   process.exit(1);
 }
