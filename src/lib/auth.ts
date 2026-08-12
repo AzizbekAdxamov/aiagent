@@ -1,4 +1,4 @@
-import prisma from "@/lib/prisma";
+import prisma, { withDbRetry } from "@/lib/prisma";
 
 /**
  * MENTALABA AUTH (BOSQICH 1):
@@ -131,7 +131,21 @@ export async function getAuthUser(request: Request): Promise<AuthUser | null> {
   let tokenExpiresAt: Date | null = expMs ? new Date(expMs) : null;
 
   // DB'dan mavjud user'ni o'qiymiz (refresh tokeni eslab qolinadi)
-  const existing = await prisma.mentalabaUser.findUnique({ where: { id: userId } });
+  // Neon pause vaqtida DB yetib bo'lmasa — xatoni yutamiz va API validatsiyaga
+  // o'tamiz (quyidagi else branch). Shunda chat 500 bermaydi, auth guest kabi ishlaydi.
+  let existing: {
+    refreshToken: string | null;
+    accessToken: string | null;
+    tokenExpiresAt: Date | null;
+  } | null = null;
+  try {
+    existing = await withDbRetry(() =>
+      prisma.mentalabaUser.findUnique({ where: { id: userId } })
+    );
+  } catch (error) {
+    const code = (error as { code?: string })?.code || "?";
+    console.warn(`[Auth] DB ulanish xatosi (${code}) — API validatsiyaga o'tamiz`);
+  }
   if (existing) {
     // DB'dagi refresh ustun; yo'q bo'lsa (yangi qurilma) header'dagi ishlatiladi
     refreshToken = existing.refreshToken || headerRefresh;
@@ -218,20 +232,28 @@ export async function getAuthUser(request: Request): Promise<AuthUser | null> {
   }
 
   // User'ni DB'ga yozamiz (yangilangan tokenlar bilan)
-  await prisma.mentalabaUser.upsert({
-    where: { id: userId },
-    update: {
-      accessToken,
-      refreshToken: refreshToken ?? null,
-      tokenExpiresAt,
-    },
-    create: {
-      id: userId,
-      accessToken,
-      refreshToken: refreshToken ?? null,
-      tokenExpiresAt,
-    },
-  });
+  // DB yozuvi cache vazifasini o'taydi — xatoda so'rovni buzmaymiz.
+  try {
+    await withDbRetry(() =>
+      prisma.mentalabaUser.upsert({
+        where: { id: userId },
+        update: {
+          accessToken,
+          refreshToken: refreshToken ?? null,
+          tokenExpiresAt,
+        },
+        create: {
+          id: userId,
+          accessToken,
+          refreshToken: refreshToken ?? null,
+          tokenExpiresAt,
+        },
+      })
+    );
+  } catch (error) {
+    const code = (error as { code?: string })?.code || "?";
+    console.warn(`[Auth] DB yozuv xatosi (${code}) — token sessiyada ishlatiladi`);
+  }
 
   return { userId, accessToken, refreshToken, tokenExpiresAt };
 }

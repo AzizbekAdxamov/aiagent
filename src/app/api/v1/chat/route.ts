@@ -415,9 +415,17 @@ export async function POST(request: NextRequest) {
     });
   } catch (error) {
     console.error("[Chat Error]", error);
+    const code = (error as { code?: string })?.code;
+    // Neon auto-pause paytida DB yetib bo'lmaydi — user'ga aniq xabar beramiz
+    const isDbError = code === "P1001" || code === "P1017" || code === "P2024";
     return NextResponse.json(
-      { success: false, error: "Internal server error" },
-      { status: 500 }
+      {
+        success: false,
+        error: isDbError
+          ? "Ma'lumotlar bazasi vaqtincha ishlamayapti (uyg'onmoqda). Iltimos, birozdan so'ng qayta urinib ko'ring."
+          : "Xizmatda vaqtincha xatolik yuz berdi. Iltimos, qayta urinib ko'ring.",
+      },
+      { status: isDbError ? 503 : 500 }
     );
   }
 }
