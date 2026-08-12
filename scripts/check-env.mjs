@@ -80,7 +80,30 @@ if (badParams.length > 0) {
   process.exit(1);
 }
 
-// 3) Qo'shtirnoq / bo'sh joy / ikki ? tekshiruvi
+// 3) Placeholder tekshiruvi — misol URL ko'chirilgan, lekin qiymatlar almashtirilmagan
+const lower = url.toLowerCase();
+if (
+  lower.includes("@host/") ||
+  lower.includes("@localhost/") ||
+  lower.includes("user:pass@") ||
+  lower.includes("username:password@") ||
+  lower.includes(":yourpassword@") ||
+  lower.includes("example.com") ||
+  lower.includes("your-db") ||
+  lower.includes("yourhost")
+) {
+  console.error(
+    "❌ DATABASE_URL'da ALMASHTIRILMAGAN placeholder bor!\n" +
+      `   Hozirgi qiymat boshidagi belgilar: ${JSON.stringify(url.slice(0, 60))}\n` +
+      "   Misol URL ko'chirilgan, lekin USER:PASS@host/db qismi HAQIQIY qiymatlar bilan\n" +
+      "   almashtirilmagan. Vercel → Settings → Environment Variables → DATABASE_URL → Edit →\n" +
+      "   qiymatni lokal backend/.env faylidagi DATABASE_URL'dan TO'LIQ ko'chirib qo'ying\n" +
+      "   (parol va host birga, o'zgartirmasdan!)."
+  );
+  process.exit(1);
+}
+
+// 4) Qo'shtirnoq / bo'sh joy / ikki ? tekshiruvi
 if (url.includes('"') || url.includes("'") || url.includes(" ") || url.includes("?" + "?")) {
   console.error(
     "❌ DATABASE_URL'da noto'g'ri belgi bor: qo'shtirnoq, bo'sh joy yoki ikki '?'\n" +
