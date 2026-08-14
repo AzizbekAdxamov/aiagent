@@ -1,0 +1,1791 @@
+{
+  "meta": {
+    "name": "Mentalaba AI — Uzun Kontekstli Stress Testlar",
+    "description": "100 ta multi-turn test — hammasi 3-14 turnli uzun konversatsiyalar. Maqsad: context retention, follow-up zanjirlari, repair, preference accumulation, field extraction va navigation.",
+    "generated": "2026-08-12"
+  },
+  "tests": [
+    {
+      "id": 1,
+      "block": 1,
+      "blockName": "Profil yig'ish zanjirlari",
+      "title": "yiqildim → IT → Toshkent → tavsiya (4 turn)",
+      "conversation": [
+        "Men bu yil imtihondan yiqildim",
+        "IT ga qiziqaman",
+        "Toshkentda yashayman",
+        "Qaysi universitetni tavsiya qilasan?"
+      ],
+      "expected": {
+        "admissionFailed": true,
+        "privateFirst": true,
+        "directionCategory": "it",
+        "contextIntact": true
+      },
+      "must_not": ["ask_public_or_private", "context_broken", "recommend_public_first"]
+    },
+    {
+      "id": 2,
+      "block": 1,
+      "blockName": "Profil yig'ish zanjirlari",
+      "title": "o'tolmadim → tibbiyot → Toshkent (4 turn)",
+      "conversation": [
+        "Imtihondan o'tolmadim",
+        "tibbiyotga qiziqaman",
+        "Toshkentda o'qimoqchiman",
+        "Menga variant topib ber"
+      ],
+      "expected": {
+        "admissionFailed": true,
+        "privateFirst": true,
+        "contextIntact": true
+      },
+      "must_not": ["ask_public_or_private", "context_broken"]
+    },
+    {
+      "id": 3,
+      "block": 1,
+      "blockName": "Profil yig'ish zanjirlari",
+      "title": "kira olmadim → o'qishni xohlayman → IT (4 turn)",
+      "conversation": [
+        "Men bu yil kira olmadim",
+        "lekin o'qishni juda xohlayman",
+        "IT yo'nalishida",
+        "Tavsiya qil"
+      ],
+      "expected": {
+        "admissionFailed": true,
+        "privateFirst": true,
+        "contextIntact": true
+      },
+      "must_not": ["ask_public_or_private", "context_broken"]
+    },
+    {
+      "id": 4,
+      "block": 1,
+      "blockName": "Profil yig'ish zanjirlari",
+      "title": "universitetga kira olmadim → IT → Toshkent (5 turn)",
+      "conversation": [
+        "Universitetga kira olmadim",
+        "nima qilishim mumkin?",
+        "ITga qiziqaman",
+        "Toshkentda yashayman",
+        "Tavsiya qilasan?"
+      ],
+      "expected": {
+        "admissionFailed": true,
+        "privateFirst": true,
+        "contextIntact": true
+      },
+      "must_not": ["ask_public_or_private", "context_broken", "recommend_public_first"]
+    },
+    {
+      "id": 5,
+      "block": 1,
+      "blockName": "Profil yig'ish zanjirlari",
+      "title": "testdan o'ta olmadim → Toshkent tibbiyot (4 turn)",
+      "conversation": [
+        "Testdan o'ta olmadim",
+        "Toshkentda o'qimoqchiman",
+        "tibbiyotga qiziqaman",
+        "variant top"
+      ],
+      "expected": {
+        "admissionFailed": true,
+        "privateFirst": true,
+        "contextIntact": true
+      },
+      "must_not": ["ask_public_or_private", "context_broken"]
+    },
+    {
+      "id": 6,
+      "block": 1,
+      "blockName": "Profil yig'ish zanjirlari",
+      "title": "davlatga kira olmadim → IT → tavsiya (4 turn)",
+      "conversation": [
+        "Davlatga kira olmadim",
+        "endi nima qilaman?",
+        "ITga qiziqaman",
+        "tavsiya qil"
+      ],
+      "expected": {
+        "admissionFailed": true,
+        "privateFirst": true,
+        "contextIntact": true
+      },
+      "must_not": ["ask_public_or_private", "context_broken"]
+    },
+    {
+      "id": 7,
+      "block": 1,
+      "blockName": "Profil yig'ish zanjirlari",
+      "title": "ballim yetmadi → xususiy bormi? → IT (4 turn)",
+      "conversation": [
+        "Ballim yetmadi",
+        "xususiy universitetlar bormi?",
+        "ITga qiziqaman",
+        "Toshkentda yashayman"
+      ],
+      "expected": {
+        "admissionFailed": true,
+        "institutionCategory": "private",
+        "contextIntact": true
+      },
+      "must_not": ["ask_public_or_private", "context_broken"]
+    },
+    {
+      "id": 8,
+      "block": 1,
+      "blockName": "Profil yig'ish zanjirlari",
+      "title": "kirolmadim → IT → Toshkent → tavsiya (4 turn)",
+      "conversation": [
+        "Bu yil o'qishga kirolmadim",
+        "IT yo'nalishida o'qimoqchiman",
+        "Toshkentda yashayman",
+        "tavsiya qil"
+      ],
+      "expected": {
+        "admissionFailed": true,
+        "privateFirst": true,
+        "contextIntact": true
+      },
+      "must_not": ["ask_public_or_private", "context_broken"]
+    },
+    {
+      "id": 9,
+      "block": 1,
+      "blockName": "Profil yig'ish zanjirlari",
+      "title": "yiqildim → orzum bor → tibbiyot → Toshkent (5 turn)",
+      "conversation": [
+        "Men yiqildim",
+        "universitetda o'qish orzum bor",
+        "tibbiyotga qiziqaman",
+        "Toshkentda qolmoqchiman",
+        "variant top"
+      ],
+      "expected": {
+        "admissionFailed": true,
+        "privateFirst": true,
+        "contextIntact": true
+      },
+      "must_not": ["ask_public_or_private", "context_broken"]
+    },
+    {
+      "id": 10,
+      "block": 1,
+      "blockName": "Profil yig'ish zanjirlari",
+      "title": "grantga ballim yetmadi → IT → tavsiya (4 turn)",
+      "conversation": [
+        "Grantga ballim yetmadi",
+        "lekin o'qishni xohlayman",
+        "ITga qiziqaman",
+        "Tavsiya qilasan?"
+      ],
+      "expected": {
+        "admissionFailed": true,
+        "privateFirst": true,
+        "contextIntact": true
+      },
+      "must_not": ["ask_public_or_private", "context_broken"]
+    },
+    {
+      "id": 11,
+      "block": 2,
+      "blockName": "Follow-up zanjirlari",
+      "title": "PDP → kontrakt → yotoqxona (3 turn)",
+      "conversation": [
+        "PDP haqida ayt",
+        "Kontrakti qancha?",
+        "Yotoqxonasi bormi?"
+      ],
+      "expected": {
+        "lastUniversity": "PDP",
+        "field": "hostel",
+        "contextIntact": true
+      },
+      "must_not": ["context_broken", "university_reset"]
+    },
+    {
+      "id": 12,
+      "block": 2,
+      "blockName": "Follow-up zanjirlari",
+      "title": "TATU → telefon → sayt (3 turn)",
+      "conversation": [
+        "TATU haqida ma'lumot ber",
+        "Telefoni?",
+        "Sayti-chi?"
+      ],
+      "expected": {
+        "lastUniversity": "TATU",
+        "field": "website",
+        "contextIntact": true
+      },
+      "must_not": ["context_broken", "university_reset"]
+    },
+    {
+      "id": 13,
+      "block": 2,
+      "blockName": "Follow-up zanjirlari",
+      "title": "PDP → narx → grant (3 turn)",
+      "conversation": [
+        "PDP",
+        "Narxi qancha?",
+        "Granti bormi?"
+      ],
+      "expected": {
+        "lastUniversity": "PDP",
+        "field": "grant",
+        "contextIntact": true
+      },
+      "must_not": ["context_broken", "university_reset"]
+    },
+    {
+      "id": 14,
+      "block": 2,
+      "blockName": "Follow-up zanjirlari",
+      "title": "Amity → yo'nalishlar → kontrakt (3 turn)",
+      "conversation": [
+        "Amity haqida ayt",
+        "Yo'nalishlari?",
+        "Kontrakti?"
+      ],
+      "expected": {
+        "lastUniversity": "Amity",
+        "field": "tuition",
+        "contextIntact": true
+      },
+      "must_not": ["context_broken", "university_reset"]
+    },
+    {
+      "id": 15,
+      "block": 2,
+      "blockName": "Follow-up zanjirlari",
+      "title": "PDP → yotoqxona → telefon (3 turn)",
+      "conversation": [
+        "PDP haqida gaplashdik",
+        "Yotoqxonasi bormi?",
+        "Telefoni?"
+      ],
+      "expected": {
+        "lastUniversity": "PDP",
+        "field": "phone",
+        "contextIntact": true
+      },
+      "must_not": ["context_broken", "university_reset"]
+    },
+    {
+      "id": 16,
+      "block": 2,
+      "blockName": "Follow-up zanjirlari",
+      "title": "TATU va PDP → birinchi telefon → ikkinchi kontrakt (4 turn)",
+      "conversation": [
+        "TATU va PDPni solishtir",
+        "Birinchi telefoni?",
+        "Ikkinchisining kontrakti?",
+        "Yana birinchi yotoqxonasi?"
+      ],
+      "expected": {
+        "contextIntact": true
+      },
+      "must_not": ["context_broken", "university_reset"]
+    },
+    {
+      "id": 17,
+      "block": 2,
+      "blockName": "Follow-up zanjirlari",
+      "title": "PDP → grant → email → manzil (4 turn)",
+      "conversation": [
+        "PDP",
+        "granti bormi?",
+        "emaili nima?",
+        "manzili qayerda?"
+      ],
+      "expected": {
+        "lastUniversity": "PDP",
+        "field": "address",
+        "contextIntact": true
+      },
+      "must_not": ["context_broken", "university_reset"]
+    },
+    {
+      "id": 18,
+      "block": 2,
+      "blockName": "Follow-up zanjirlari",
+      "title": "TATU → kontrakt → yotoqxona → telefon (4 turn)",
+      "conversation": [
+        "TATU",
+        "kontrakti?",
+        "yotoqxonasi?",
+        "telefoni?"
+      ],
+      "expected": {
+        "lastUniversity": "TATU",
+        "field": "phone",
+        "contextIntact": true
+      },
+      "must_not": ["context_broken", "university_reset"]
+    },
+    {
+      "id": 19,
+      "block": 2,
+      "blockName": "Follow-up zanjirlari",
+      "title": "Amity → narx → grant → yotoqxona (4 turn)",
+      "conversation": [
+        "Amity",
+        "narxi?",
+        "granti?",
+        "yotoqxonasi?"
+      ],
+      "expected": {
+        "lastUniversity": "Amity",
+        "field": "hostel",
+        "contextIntact": true
+      },
+      "must_not": ["context_broken", "university_reset"]
+    },
+    {
+      "id": 20,
+      "block": 2,
+      "blockName": "Follow-up zanjirlari",
+      "title": "PDP → kontrakt → grant → qabul (4 turn)",
+      "conversation": [
+        "PDP",
+        "kontrakti?",
+        "granti?",
+        "qabul qilayaptimi?"
+      ],
+      "expected": {
+        "lastUniversity": "PDP",
+        "field": "admission",
+        "contextIntact": true
+      },
+      "must_not": ["context_broken", "university_reset"]
+    },
+    {
+      "id": 21,
+      "block": 3,
+      "blockName": "Repair zanjirlari",
+      "title": "TATU → EMU → kontrakt (3 turn)",
+      "conversation": [
+        "TATU haqida ayt",
+        "Yo'q, EMUni aytgandim",
+        "Kontrakti qancha?"
+      ],
+      "expected": {
+        "lastUniversity": "EMU",
+        "field": "tuition",
+        "contextIntact": true
+      },
+      "must_not": ["context_broken", "tat_u_kept", "wrong_university_after_repair"]
+    },
+    {
+      "id": 22,
+      "block": 3,
+      "blockName": "Repair zanjirlari",
+      "title": "PDP → Amity → narx (3 turn)",
+      "conversation": [
+        "PDP haqida ayt",
+        "Yo'q, Amityni nazarda tutdim",
+        "Narxi qancha?"
+      ],
+      "expected": {
+        "lastUniversity": "Amity",
+        "field": "tuition",
+        "contextIntact": true
+      },
+      "must_not": ["context_broken", "pdp_kept", "wrong_university_after_repair"]
+    },
+    {
+      "id": 23,
+      "block": 3,
+      "blockName": "Repair zanjirlari",
+      "title": "TATU → xususiy kerak → tavsiya (3 turn)",
+      "conversation": [
+        "TATU",
+        "Yo'q, Toshkentdagi xususiy universitet kerak",
+        "tavsiya qil"
+      ],
+      "expected": {
+        "institutionCategory": "private",
+        "contextIntact": true
+      },
+      "must_not": ["context_broken", "ask_public_or_private"]
+    },
+    {
+      "id": 24,
+      "block": 3,
+      "blockName": "Repair zanjirlari",
+      "title": "Amity → boshqa universitet → clarification (3 turn)",
+      "conversation": [
+        "Amity haqida ayt",
+        "Yo'q, boshqa universitet"
+      ],
+      "expected": {
+        "needsClarification": true,
+        "contextIntact": true
+      },
+      "must_not": ["context_broken", "amity_kept"]
+    },
+    {
+      "id": 25,
+      "block": 3,
+      "blockName": "Repair zanjirlari",
+      "title": "PDP → EMU → kontrakt (3 turn)",
+      "conversation": [
+        "PDP",
+        "Yo'q, men EMUni aytgandim",
+        "kontrakti?"
+      ],
+      "expected": {
+        "lastUniversity": "EMU",
+        "field": "tuition",
+        "contextIntact": true
+      },
+      "must_not": ["context_broken", "pdp_kept", "men_emu_false_entity"]
+    },
+    {
+      "id": 26,
+      "block": 3,
+      "blockName": "Repair zanjirlari",
+      "title": "TATU → boshqa shahar (universitet repair emas) (3 turn)",
+      "conversation": [
+        "TATU haqida ayt",
+        "Yo'q, boshqa shahar",
+        "Samarqandda nima bor?"
+      ],
+      "expected": {
+        "needsClarification": false,
+        "contextIntact": true
+      },
+      "must_not": ["context_broken"]
+    },
+    {
+      "id": 27,
+      "block": 3,
+      "blockName": "Repair zanjirlari",
+      "title": "TATU → PDP kerak emas (3 turn)",
+      "conversation": [
+        "TATU",
+        "Yo'q, PDP kerak emas",
+        "TATUning kontrakti?"
+      ],
+      "expected": {
+        "lastUniversity": "TATU",
+        "field": "tuition",
+        "contextIntact": true
+      },
+      "must_not": ["context_broken", "pdp_kept", "university_reset"]
+    },
+    {
+      "id": 28,
+      "block": 3,
+      "blockName": "Repair zanjirlari",
+      "title": "PDP → boshqa narsa so'radim → clarification (3 turn)",
+      "conversation": [
+        "PDP haqida ayt",
+        "Yo'q, boshqa narsa so'radim"
+      ],
+      "expected": {
+        "needsClarification": true,
+        "contextIntact": true
+      },
+      "must_not": ["context_broken", "pdp_kept"]
+    },
+    {
+      "id": 29,
+      "block": 3,
+      "blockName": "Repair zanjirlari",
+      "title": "TATU → EMU → telefon (3 turn)",
+      "conversation": [
+        "TATU haqida ayt",
+        "Yo'q, EMUni aytdim",
+        "Telefon raqami bormi?"
+      ],
+      "expected": {
+        "lastUniversity": "EMU",
+        "field": "phone",
+        "contextIntact": true
+      },
+      "must_not": ["context_broken", "tat_u_kept", "wrong_university_after_repair"]
+    },
+    {
+      "id": 30,
+      "block": 3,
+      "blockName": "Repair zanjirlari",
+      "title": "Amity → boshqasi → clarification (3 turn)",
+      "conversation": [
+        "Amity",
+        "Yo'q, boshqasi"
+      ],
+      "expected": {
+        "needsClarification": true,
+        "contextIntact": true
+      },
+      "must_not": ["context_broken", "amity_kept"]
+    },
+    {
+      "id": 31,
+      "block": 4,
+      "blockName": "Recommendation navigation",
+      "title": "Tavsiya → birinchi → kontrakt (3 turn)",
+      "conversation": [
+        "Toshkentda IT bo'yicha universitet tavsiya qil",
+        "Birinchisi haqida ayt",
+        "Kontrakti qancha?"
+      ],
+      "expected": {
+        "field": "tuition",
+        "contextIntact": true
+      },
+      "must_not": ["context_broken", "first_item_returned", "university_reset"]
+    },
+    {
+      "id": 32,
+      "block": 4,
+      "blockName": "Recommendation navigation",
+      "title": "Tavsiya → ikkinchisi → telefon (3 turn)",
+      "conversation": [
+        "Toshkentda IT bo'yicha universitet tavsiya qil",
+        "Ikkinchisi-chi?",
+        "Telefoni?"
+      ],
+      "expected": {
+        "field": "phone",
+        "contextIntact": true
+      },
+      "must_not": ["context_broken", "first_item_returned", "university_reset"]
+    },
+    {
+      "id": 33,
+      "block": 4,
+      "blockName": "Recommendation navigation",
+      "title": "Tavsiya → uchinchisi → yo'nalishlar (3 turn)",
+      "conversation": [
+        "Toshkentda IT bo'yicha universitet tavsiya qil",
+        "Uchinchisi haqida batafsil",
+        "Yo'nalishlari?"
+      ],
+      "expected": {
+        "field": "directions",
+        "contextIntact": true
+      },
+      "must_not": ["context_broken", "first_item_returned", "university_reset"]
+    },
+    {
+      "id": 34,
+      "block": 4,
+      "blockName": "Recommendation navigation",
+      "title": "Tavsiya → to'rtinchi → kontrakt (3 turn)",
+      "conversation": [
+        "Toshkentda IT bo'yicha universitet tavsiya qil",
+        "To'rtinchisi haqida",
+        "Shuni kontrakti qancha?"
+      ],
+      "expected": {
+        "field": "tuition",
+        "contextIntact": true
+      },
+      "must_not": ["context_broken", "first_item_returned", "university_reset"]
+    },
+    {
+      "id": 35,
+      "block": 4,
+      "blockName": "Recommendation navigation",
+      "title": "Tavsiya → keyingisi → telefon (3 turn)",
+      "conversation": [
+        "Toshkentda IT bo'yicha universitet tavsiya qil",
+        "Keyingisi",
+        "Telefon raqami?"
+      ],
+      "expected": {
+        "field": "phone",
+        "contextIntact": true
+      },
+      "must_not": ["context_broken", "first_item_returned", "university_reset"]
+    },
+    {
+      "id": 36,
+      "block": 4,
+      "blockName": "Recommendation navigation",
+      "title": "Tavsiya → yana bittasini → grant (3 turn)",
+      "conversation": [
+        "Toshkentda IT bo'yicha universitet tavsiya qil",
+        "Yana bittasini ko'rsat",
+        "Granti bormi?"
+      ],
+      "expected": {
+        "field": "grant",
+        "contextIntact": true
+      },
+      "must_not": ["context_broken", "same_result_repeated", "university_reset"]
+    },
+    {
+      "id": 37,
+      "block": 4,
+      "blockName": "Recommendation navigation",
+      "title": "Tavsiya → eng arzoni → kontrakt (3 turn)",
+      "conversation": [
+        "Toshkentda IT bo'yicha universitet tavsiya qil",
+        "Eng arzoni qaysi?",
+        "Kontrakti qancha?"
+      ],
+      "expected": {
+        "field": "tuition",
+        "contextIntact": true
+      },
+      "must_not": ["context_broken", "university_reset"]
+    },
+    {
+      "id": 38,
+      "block": 4,
+      "blockName": "Recommendation navigation",
+      "title": "Tavsiya → grantlisi → telefon (3 turn)",
+      "conversation": [
+        "Toshkentda IT bo'yicha universitet tavsiya qil",
+        "Grantlisi qaysi?",
+        "Telefoni?"
+      ],
+      "expected": {
+        "field": "phone",
+        "contextIntact": true
+      },
+      "must_not": ["context_broken", "university_reset"]
+    },
+    {
+      "id": 39,
+      "block": 4,
+      "blockName": "Recommendation navigation",
+      "title": "Tavsiya → yotoqxonasi borini → kontrakt (3 turn)",
+      "conversation": [
+        "Toshkentda IT bo'yicha universitet tavsiya qil",
+        "Yotoqxonasi borini ko'rsat",
+        "Kontrakti?"
+      ],
+      "expected": {
+        "field": "tuition",
+        "contextIntact": true
+      },
+      "must_not": ["context_broken", "hostel_ignored", "university_reset"]
+    },
+    {
+      "id": 40,
+      "block": 4,
+      "blockName": "Recommendation navigation",
+      "title": "Tavsiya → xususiylarini → birinchi telefon (3 turn)",
+      "conversation": [
+        "Toshkentda IT bo'yicha universitet tavsiya qil",
+        "Shulardan xususiylarini ko'rsat",
+        "Birinchi telefoni?"
+      ],
+      "expected": {
+        "institutionCategory": "private",
+        "field": "phone",
+        "contextIntact": true,
+        "scope": "all"
+      },
+      "must_not": ["context_broken", "university_reset"]
+    },
+    {
+      "id": 41,
+      "block": 5,
+      "blockName": "Preference kombinatsiyalari",
+      "title": "Toshkent + IT + xususiy + 20 mln (5 turn)",
+      "conversation": [
+        "Toshkentda yashayman",
+        "ITga qiziqaman",
+        "Xususiy bo'lsin",
+        "20 milliondan oshmasin",
+        "Universitet tavsiya qil"
+      ],
+      "expected": {
+        "institutionCategory": "private",
+        "contextIntact": true
+      },
+      "must_not": ["context_broken", "any_preference_lost", "over_budget_recommended"]
+    },
+    {
+      "id": 42,
+      "block": 5,
+      "blockName": "Preference kombinatsiyalari",
+      "title": "Tibbiyot + Toshkent + yotoqxona + grant (5 turn)",
+      "conversation": [
+        "Tibbiyotga qiziqaman",
+        "Toshkentda o'qimoqchiman",
+        "Yotoqxona kerak",
+        "Grant bo'lsa yaxshi",
+        "Qaysilarini tavsiya qilasan?"
+      ],
+      "expected": {
+        "hostel": true,
+        "grant": true,
+        "contextIntact": true
+      },
+      "must_not": ["context_broken", "any_preference_lost", "hostel_ignored", "grant_ignored"]
+    },
+    {
+      "id": 43,
+      "block": 5,
+      "blockName": "Preference kombinatsiyalari",
+      "title": "IT + ingliz tili + xalqaro (4 turn)",
+      "conversation": [
+        "ITga qiziqaman",
+        "Ingliz tilida o'qitiladigan bo'lsin",
+        "Xalqaro universitet kerak",
+        "Tavsiya qil"
+      ],
+      "expected": {
+        "institutionCategory": "private",
+        "contextIntact": true
+      },
+      "must_not": ["context_broken", "any_preference_lost", "language_ignored"]
+    },
+    {
+      "id": 44,
+      "block": 5,
+      "blockName": "Preference kombinatsiyalari",
+      "title": "Iqtisodiyot + Toshkent + davlat + yotoqxona (5 turn)",
+      "conversation": [
+        "Iqtisodiyotga qiziqaman",
+        "Toshkentda",
+        "Davlat universiteti bo'lsin",
+        "Yotoqxona ham kerak",
+        "Tavsiya qil"
+      ],
+      "expected": {
+        "institutionCategory": "state",
+        "hostel": true,
+        "contextIntact": true
+      },
+      "must_not": ["context_broken", "any_preference_lost", "hostel_ignored"]
+    },
+    {
+      "id": 45,
+      "block": 5,
+      "blockName": "Preference kombinatsiyalari",
+      "title": "IT + 15 mln + yotoqxona + Toshkent (5 turn)",
+      "conversation": [
+        "ITga qiziqaman",
+        "Budgetim 15 million",
+        "Yotoqxona kerak",
+        "Toshkentda yashayman",
+        "Tavsiya qil"
+      ],
+      "expected": {
+        "hostel": true,
+        "contextIntact": true
+      },
+      "must_not": ["context_broken", "any_preference_lost", "over_budget_recommended"]
+    },
+    {
+      "id": 46,
+      "block": 5,
+      "blockName": "Preference kombinatsiyalari",
+      "title": "Tibbiyot + xususiy + Toshkent + grant (5 turn)",
+      "conversation": [
+        "Tibbiyotga qiziqaman",
+        "Xususiy bo'lsin",
+        "Toshkentda",
+        "Grant bo'lsa zo'r bo'lardi",
+        "Tavsiya qil"
+      ],
+      "expected": {
+        "institutionCategory": "private",
+        "grant": true,
+        "contextIntact": true
+      },
+      "must_not": ["context_broken", "any_preference_lost", "grant_ignored"]
+    },
+    {
+      "id": 47,
+      "block": 5,
+      "blockName": "Preference kombinatsiyalari",
+      "title": "IT + Toshkent + davlat + grant (5 turn)",
+      "conversation": [
+        "ITga qiziqaman",
+        "Toshkentda",
+        "Davlat universiteti kerak",
+        "Grant ham bo'lsa yaxshi",
+        "Tavsiya qil"
+      ],
+      "expected": {
+        "institutionCategory": "state",
+        "grant": true,
+        "contextIntact": true
+      },
+      "must_not": ["context_broken", "any_preference_lost", "grant_ignored"]
+    },
+    {
+      "id": 48,
+      "block": 5,
+      "blockName": "Preference kombinatsiyalari",
+      "title": "Pedagogika + Samarqand + yotoqxona (4 turn)",
+      "conversation": [
+        "Pedagogika sohasiga qiziqaman",
+        "Samarqandda o'qimoqchiman",
+        "Yotoqxona kerak",
+        "Variant top"
+      ],
+      "expected": {
+        "hostel": true,
+        "contextIntact": true
+      },
+      "must_not": ["context_broken", "any_preference_lost", "hostel_ignored"]
+    },
+    {
+      "id": 49,
+      "block": 5,
+      "blockName": "Preference kombinatsiyalari",
+      "title": "IT + Toshkent + 20 mln + yotoqxona + grant + xususiy (7 turn)",
+      "conversation": [
+        "ITga qiziqaman",
+        "Toshkentda yashayman",
+        "20 milliongacha bo'lsa yaxshi",
+        "Yotoqxona kerak",
+        "Grant bo'lsa yaxshi",
+        "Xususiylardan qaraylik",
+        "Eng yaxshisini ayt"
+      ],
+      "expected": {
+        "institutionCategory": "private",
+        "hostel": true,
+        "grant": true,
+        "contextIntact": true
+      },
+      "must_not": ["context_broken", "any_preference_lost", "ask_public_or_private"]
+    },
+    {
+      "id": 50,
+      "block": 5,
+      "blockName": "Preference kombinatsiyalari",
+      "title": "Huquq + Toshkent + davlat (4 turn)",
+      "conversation": [
+        "Huquqshunos bo'lmoqchiman",
+        "Toshkentda",
+        "Davlat universitetida o'qimoqchiman",
+        "Tavsiya qil"
+      ],
+      "expected": {
+        "institutionCategory": "state",
+        "contextIntact": true
+      },
+      "must_not": ["context_broken", "any_preference_lost"]
+    },
+    {
+      "id": 51,
+      "block": 6,
+      "blockName": "Mavzu almashinuvi",
+      "title": "Tibbiyot → IT ga o'tish (4 turn)",
+      "conversation": [
+        "Tibbiyotga qiziqaman",
+        "Toshkentda o'qimoqchiman",
+        "Yo'q, aslida ITga o'qimoqchiman",
+        "Tavsiya qil"
+      ],
+      "expected": {
+        "directionCategory": "it",
+        "contextIntact": true
+      },
+      "must_not": ["context_broken", "tibbiyot_ignored", "unrelated_direction"]
+    },
+    {
+      "id": 52,
+      "block": 6,
+      "blockName": "Mavzu almashinuvi",
+      "title": "IT → tibbiyotga o'tish (4 turn)",
+      "conversation": [
+        "IT bo'yicha tavsiya qil",
+        "Yo'q, tibbiyotni ko'raylik",
+        "Toshkentda",
+        "Variant top"
+      ],
+      "expected": {
+        "directionCategory": "tibbiyot",
+        "contextIntact": true
+      },
+      "must_not": ["context_broken", "unrelated_direction"]
+    },
+    {
+      "id": 53,
+      "block": 6,
+      "blockName": "Mavzu almashinuvi",
+      "title": "TATU → IT tavsiyaga o'tish (4 turn)",
+      "conversation": [
+        "TATU haqida ayt",
+        "Kontrakti?",
+        "Endi boshqa mavzu — ITga o'tamiz",
+        "Tavsiya qil"
+      ],
+      "expected": {
+        "directionCategory": "it",
+        "contextIntact": true
+      },
+      "must_not": ["context_broken", "tat_u_kept"]
+    },
+    {
+      "id": 54,
+      "block": 6,
+      "blockName": "Mavzu almashinuvi",
+      "title": "PDP → tibbiyot tavsiyaga o'tish (4 turn)",
+      "conversation": [
+        "PDP haqida ayt",
+        "Yotoqxonasi?",
+        "Endi boshqa mavzu",
+        "Toshkentda tibbiyot bo'yicha tavsiya qil"
+      ],
+      "expected": {
+        "directionCategory": "tibbiyot",
+        "contextIntact": true
+      },
+      "must_not": ["context_broken", "pdp_kept"]
+    },
+    {
+      "id": 55,
+      "block": 6,
+      "blockName": "Mavzu almashinuvi",
+      "title": "Toshkent → Samarqandga o'tish (4 turn)",
+      "conversation": [
+        "ITga qiziqaman",
+        "Toshkentda o'qimoqchiman",
+        "Aslida Samarqandga ko'chdim",
+        "Endi tavsiya qil"
+      ],
+      "expected": {
+        "directionCategory": "it",
+        "contextIntact": true
+      },
+      "must_not": ["context_broken", "toshkent_used", "samarqand_as_preferred_city"]
+    },
+    {
+      "id": 56,
+      "block": 6,
+      "blockName": "Mavzu almashinuvi",
+      "title": "Farmatsiya emas, davolash ishi (4 turn)",
+      "conversation": [
+        "Tibbiyotga qiziqaman",
+        "Yo'q, farmatsiya emas",
+        "Davolash ishi bo'yicha",
+        "Toshkentda qaysi universitetlarda bor?"
+      ],
+      "expected": {
+        "contextIntact": true
+      },
+      "must_not": ["context_broken", "farmatsiya_included", "category_expansion_mixed"]
+    },
+    {
+      "id": 57,
+      "block": 6,
+      "blockName": "Mavzu almashinuvi",
+      "title": "Yotoqxona kerakligini qo'shish (4 turn)",
+      "conversation": [
+        "Toshkentda IT tavsiya qil",
+        "Yo'q, shaharni o'zgartirmadim",
+        "Yotoqxona kerak edi",
+        "Qayta tavsiya qil"
+      ],
+      "expected": {
+        "hostel": true,
+        "contextIntact": true
+      },
+      "must_not": ["context_broken", "hostel_ignored"]
+    },
+    {
+      "id": 58,
+      "block": 6,
+      "blockName": "Mavzu almashinuvi",
+      "title": "Davlat → xususiy ham bo'ladi (4 turn)",
+      "conversation": [
+        "Davlat universiteti kerak",
+        "Toshkentda IT",
+        "Yo'q, xususiy ham bo'ladi",
+        "Tavsiya qil"
+      ],
+      "expected": {
+        "institutionCategory": "private",
+        "contextIntact": true
+      },
+      "must_not": ["context_broken", "ask_public_or_private"]
+    },
+    {
+      "id": 59,
+      "block": 6,
+      "blockName": "Mavzu almashinuvi",
+      "title": "Budget yangilanishi 20 → 30 mln (4 turn)",
+      "conversation": [
+        "ITga qiziqaman",
+        "20 milliondan oshmasin",
+        "Yo'q, 30 million bo'lishi mumkin",
+        "Tavsiya qil"
+      ],
+      "expected": {
+        "contextIntact": true
+      },
+      "must_not": ["context_broken", "over_budget_recommended"]
+    },
+    {
+      "id": 60,
+      "block": 6,
+      "blockName": "Mavzu almashinuvi",
+      "title": "Yotoqxona → grant muhimroq (5 turn)",
+      "conversation": [
+        "Tibbiyotga qiziqaman",
+        "Toshkentda",
+        "Yotoqxona kerak",
+        "Yo'q, grant muhimroq",
+        "Tavsiya qil"
+      ],
+      "expected": {
+        "grant": true,
+        "contextIntact": true
+      },
+      "must_not": ["context_broken", "grant_ignored"]
+    },
+    {
+      "id": 61,
+      "block": 7,
+      "blockName": "E2E uzun zanjirlar",
+      "title": "12 turn — to'liq abituriyent sayohati",
+      "conversation": [
+        "Salom",
+        "Men bu yil imtihondan yiqildim",
+        "Lekin o'qishni juda xohlayman",
+        "Yoshligimdan ITga qiziqaman",
+        "Toshkentda yashayman",
+        "20 milliongacha bo'lsa yaxshi",
+        "Xususiy bo'lsin",
+        "Yotoqxona ham kerak",
+        "Grant bo'lsa zo'r bo'lardi",
+        "Qaysi birini tavsiya qilasan?",
+        "Birinchisi haqida batafsil",
+        "Kontrakti qancha?"
+      ],
+      "expected": {
+        "admissionFailed": true,
+        "privateFirst": true,
+        "field": "tuition",
+        "contextIntact": true,
+        "scope": "all"
+      },
+      "must_not": ["context_broken", "ask_public_or_private", "any_preference_lost", "university_reset"]
+    },
+    {
+      "id": 62,
+      "block": 7,
+      "blockName": "E2E uzun zanjirlar",
+      "title": "5 turn — doktor bo'lish sayohati",
+      "conversation": [
+        "Men doktor bo'lishni xohlayman",
+        "Toshkentda yashayman",
+        "Bu yil kira olmadim",
+        "Nima qilishim mumkin?",
+        "Variant top"
+      ],
+      "expected": {
+        "admissionFailed": true,
+        "privateFirst": true,
+        "contextIntact": true,
+        "scope": "all"
+      },
+      "must_not": ["context_broken", "ask_public_or_private"]
+    },
+    {
+      "id": 63,
+      "block": 7,
+      "blockName": "E2E uzun zanjirlar",
+      "title": "6 turn — PDP field marafoni",
+      "conversation": [
+        "PDP haqida ayt",
+        "Kontrakti?",
+        "Yotoqxonasi?",
+        "Telefoni?",
+        "Sayti?",
+        "Granti?"
+      ],
+      "expected": {
+        "lastUniversity": "PDP",
+        "field": "grant",
+        "contextIntact": true
+      },
+      "must_not": ["context_broken", "university_reset"]
+    },
+    {
+      "id": 64,
+      "block": 7,
+      "blockName": "E2E uzun zanjirlar",
+      "title": "5 turn — repair + field zanjiri",
+      "conversation": [
+        "TATU haqida ayt",
+        "Yo'q, EMUni aytgandim",
+        "Kontrakti?",
+        "Yotoqxonasi?",
+        "Telefoni?"
+      ],
+      "expected": {
+        "lastUniversity": "EMU",
+        "field": "phone",
+        "contextIntact": true
+      },
+      "must_not": ["context_broken", "tat_u_kept", "wrong_university_after_repair", "university_reset"]
+    },
+    {
+      "id": 65,
+      "block": 7,
+      "blockName": "E2E uzun zanjirlar",
+      "title": "5 turn — navigation + field zanjiri",
+      "conversation": [
+        "Toshkentda IT universitet tavsiya qil",
+        "Ikkinchisi",
+        "Kontrakti?",
+        "Yotoqxonasi?",
+        "Telefoni?"
+      ],
+      "expected": {
+        "field": "phone",
+        "contextIntact": true
+      },
+      "must_not": ["context_broken", "first_item_returned", "university_reset"]
+    },
+    {
+      "id": 66,
+      "block": 7,
+      "blockName": "E2E uzun zanjirlar",
+      "title": "5 turn — kira olmadim + tibbiyot + grant",
+      "conversation": [
+        "Men bu yil kira olmadim",
+        "Tibbiyotga qiziqaman",
+        "Toshkentda o'qimoqchiman",
+        "Variant top",
+        "Shulardan grantlisi?"
+      ],
+      "expected": {
+        "admissionFailed": true,
+        "privateFirst": true,
+        "grant": true,
+        "contextIntact": true,
+        "scope": "all"
+      },
+      "must_not": ["context_broken", "ask_public_or_private", "grant_ignored"]
+    },
+    {
+      "id": 67,
+      "block": 7,
+      "blockName": "E2E uzun zanjirlar",
+      "title": "8 turn — to'liq preference + field",
+      "conversation": [
+        "Toshkentda yashayman",
+        "ITga qiziqaman",
+        "20 milliongacha",
+        "Yotoqxona kerak",
+        "Grant bo'lsa yaxshi",
+        "Tavsiya qil",
+        "Birinchisining kontrakti?",
+        "Telefon raqami?"
+      ],
+      "expected": {
+        "hostel": true,
+        "grant": true,
+        "field": "phone",
+        "contextIntact": true,
+        "scope": "all"
+      },
+      "must_not": ["context_broken", "any_preference_lost", "university_reset"]
+    },
+    {
+      "id": 68,
+      "block": 7,
+      "blockName": "E2E uzun zanjirlar",
+      "title": "6 turn — tavsiya + ikkinchi + yo'nalishlar",
+      "conversation": [
+        "ITga qiziqaman",
+        "Toshkentda o'qimoqchiman",
+        "Xususiy bo'lsin",
+        "Tavsiya qil",
+        "Ikkinchisi haqida ayt",
+        "Yo'nalishlari?"
+      ],
+      "expected": {
+        "institutionCategory": "private",
+        "field": "directions",
+        "contextIntact": true,
+        "scope": "all"
+      },
+      "must_not": ["context_broken", "first_item_returned", "university_reset"]
+    },
+    {
+      "id": 69,
+      "block": 7,
+      "blockName": "E2E uzun zanjirlar",
+      "title": "6 turn — yiqildim + xususiy + eng yaxshisi + telefon",
+      "conversation": [
+        "Imtihondan yiqildim",
+        "ITga qiziqaman",
+        "Toshkentda yashayman",
+        "Xususiylardan qara",
+        "Eng yaxshisini ayt",
+        "Birinchi telefoni?"
+      ],
+      "expected": {
+        "admissionFailed": true,
+        "privateFirst": true,
+        "field": "phone",
+        "contextIntact": true,
+        "scope": "all"
+      },
+      "must_not": ["context_broken", "ask_public_or_private", "university_reset"]
+    },
+    {
+      "id": 70,
+      "block": 7,
+      "blockName": "E2E uzun zanjirlar",
+      "title": "7 turn — kirmoqchiman + tibbiyot + yiqildim",
+      "conversation": [
+        "Salom",
+        "Men universitetga kirmoqchiman",
+        "Tibbiyotga qiziqaman",
+        "Toshkentda yashayman",
+        "Bu yil imtihondan yiqildim",
+        "Nima qilishim kerak?",
+        "Variant top"
+      ],
+      "expected": {
+        "admissionFailed": true,
+        "privateFirst": true,
+        "contextIntact": true
+      },
+      "must_not": ["context_broken", "ask_public_or_private", "recommend_public_first"]
+    },
+    {
+      "id": 71,
+      "block": 8,
+      "blockName": "Qarama-qarshilik / noaniqlik",
+      "title": "Yiqildim + davlat xohlayman (4 turn)",
+      "conversation": [
+        "Imtihondan yiqildim",
+        "Lekin davlat universitetini xohlayman",
+        "Toshkentda IT",
+        "Tavsiya qil"
+      ],
+      "expected": {
+        "institutionCategory": "state",
+        "admissionFailed": true,
+        "contextIntact": true
+      },
+      "must_not": ["context_broken", "private_first_overrides_explicit_state"]
+    },
+    {
+      "id": 72,
+      "block": 8,
+      "blockName": "Qarama-qarshilik / noaniqlik",
+      "title": "Davlat kerak, lekin yiqildim, xususiy ham bo'ladi (4 turn)",
+      "conversation": [
+        "Davlat universiteti kerak",
+        "Lekin imtihondan yiqildim",
+        "Xususiy ham bo'lishi mumkin",
+        "Tavsiya qil"
+      ],
+      "expected": {
+        "privateFirst": true,
+        "contextIntact": true
+      },
+      "must_not": ["context_broken", "ask_public_or_private"]
+    },
+    {
+      "id": 73,
+      "block": 8,
+      "blockName": "Qarama-qarshilik / noaniqlik",
+      "title": "IT + dasturlashni xohlamayman (4 turn)",
+      "conversation": [
+        "IT o'qimoqchiman",
+        "Lekin dasturlashni xohlamayman",
+        "Toshkentda",
+        "Qanday variantlar bor?"
+      ],
+      "expected": {
+        "directionCategory": "it",
+        "contextIntact": true
+      },
+      "must_not": ["context_broken", "dasturlash_only"]
+    },
+    {
+      "id": 74,
+      "block": 8,
+      "blockName": "Qarama-qarshilik / noaniqlik",
+      "title": "Tibbiyot + doktor bo'lish shart emas (4 turn)",
+      "conversation": [
+        "Tibbiyotga qiziqaman",
+        "Lekin doktor bo'lish shart emas",
+        "Toshkentda o'qimoqchiman",
+        "Variant top"
+      ],
+      "expected": {
+        "directionCategory": "tibbiyot",
+        "contextIntact": true
+      },
+      "must_not": ["context_broken", "davolash_ishi_locked"]
+    },
+    {
+      "id": 75,
+      "block": 8,
+      "blockName": "Qarama-qarshilik / noaniqlik",
+      "title": "Universitet kerak emas, faqat yo'nalishlar (4 turn)",
+      "conversation": [
+        "Menga universitet kerak emas",
+        "Faqat yo'nalishlar haqida ayt",
+        "IT bo'yicha nimalar bor?",
+        "Toshkentda qaysi yo'nalishlar mavjud?"
+      ],
+      "expected": {
+        "needsClarification": false,
+        "contextIntact": true
+      },
+      "must_not": ["context_broken", "unrequested_recommendation"]
+    },
+    {
+      "id": 76,
+      "block": 8,
+      "blockName": "Qarama-qarshilik / noaniqlik",
+      "title": "Eng arzon + sifatli + Toshkent IT (4 turn)",
+      "conversation": [
+        "Eng arzon universitet kerak",
+        "Lekin sifatli bo'lsin",
+        "Toshkentda IT",
+        "Tavsiya qil"
+      ],
+      "expected": {
+        "contextIntact": true
+      },
+      "must_not": ["context_broken", "only_cheapest_no_quality"]
+    },
+    {
+      "id": 77,
+      "block": 8,
+      "blockName": "Qarama-qarshilik / noaniqlik",
+      "title": "Regionni bekor qilish (4 turn)",
+      "conversation": [
+        "Toshkentda o'qimoqchiman",
+        "ITga qiziqaman",
+        "Aslida Toshkentda emas",
+        "Samarqandda o'qimoqchiman"
+      ],
+      "expected": {
+        "contextIntact": true
+      },
+      "must_not": ["context_broken", "toshkent_used"]
+    },
+    {
+      "id": 78,
+      "block": 8,
+      "blockName": "Qarama-qarshilik / noaniqlik",
+      "title": "Hamma gapni unut (3 turn)",
+      "conversation": [
+        "Tibbiyotga qiziqaman",
+        "Toshkentda 20 mln",
+        "Yo'q, oldingi gaplarimni unut, IT bo'yicha tavsiya qil"
+      ],
+      "expected": {
+        "directionCategory": "it",
+        "contextIntact": true
+      },
+      "must_not": ["context_broken", "tibbiyot_ignored", "unrelated_direction"]
+    },
+    {
+      "id": 79,
+      "block": 8,
+      "blockName": "Qarama-qarshilik / noaniqlik",
+      "title": "Davlat/xususiy farqi yo'q + yiqildim (5 turn)",
+      "conversation": [
+        "Davlat yoki xususiy farqi yo'q",
+        "Imtihondan yiqildim",
+        "Toshkentda IT o'qimoqchiman",
+        "Eng yaxshi variantlarni top",
+        "Tavsiya qil"
+      ],
+      "expected": {
+        "admissionFailed": true,
+        "privateFirst": true,
+        "contextIntact": true
+      },
+      "must_not": ["context_broken", "ask_public_or_private", "recommend_public_first"]
+    },
+    {
+      "id": 80,
+      "block": 8,
+      "blockName": "Qarama-qarshilik / noaniqlik",
+      "title": "15 mln + yaxshi universitet (4 turn)",
+      "conversation": [
+        "Men 15 million to'lay olaman",
+        "Lekin yaxshi universitet bo'lsin",
+        "Toshkentda IT",
+        "Tavsiya qil"
+      ],
+      "expected": {
+        "contextIntact": true
+      },
+      "must_not": ["context_broken", "over_budget_recommended"]
+    },
+    {
+      "id": 81,
+      "block": 9,
+      "blockName": "Xotira / recall",
+      "title": "Eski profil eslab qolinishi (3 turn)",
+      "conversation": [
+        "Men Toshkentda yashayman",
+        "ITga qiziqaman",
+        "Qaysi universitetni tavsiya qilasan?"
+      ],
+      "expected": {
+        "directionCategory": "it",
+        "contextIntact": true
+      },
+      "must_not": ["context_broken", "tibbiyot_ignored", "unrelated_direction"]
+    },
+    {
+      "id": 82,
+      "block": 9,
+      "blockName": "Xotira / recall",
+      "title": "Budget esda qolishi (4 turn)",
+      "conversation": [
+        "Tibbiyotga qiziqaman",
+        "Toshkentda",
+        "Kontraktim 20 milliongacha",
+        "Endi tavsiya qil"
+      ],
+      "expected": {
+        "contextIntact": true
+      },
+      "must_not": ["context_broken", "over_budget_recommended"]
+    },
+    {
+      "id": 83,
+      "block": 9,
+      "blockName": "Xotira / recall",
+      "title": "PDP esda qolishi (3 turn)",
+      "conversation": [
+        "PDP haqida ayt",
+        "Yotoqxonasi bormi?",
+        "Telefoni-chi?"
+      ],
+      "expected": {
+        "lastUniversity": "PDP",
+        "field": "phone",
+        "contextIntact": true
+      },
+      "must_not": ["context_broken", "university_reset"]
+    },
+    {
+      "id": 84,
+      "block": 9,
+      "blockName": "Xotira / recall",
+      "title": "TATU haqida gaplashdik (3 turn)",
+      "conversation": [
+        "TATU haqida gaplashdik",
+        "Uning kontrakti qancha?",
+        "Yotoqxonasi bormi?"
+      ],
+      "expected": {
+        "lastUniversity": "TATU",
+        "field": "hostel",
+        "contextIntact": true
+      },
+      "must_not": ["context_broken", "university_reset"]
+    },
+    {
+      "id": 85,
+      "block": 9,
+      "blockName": "Xotira / recall",
+      "title": "To'liq profil accumulation (5 turn)",
+      "conversation": [
+        "Men bu yil imtihondan yiqildim",
+        "ITga qiziqaman",
+        "Toshkentda yashayman",
+        "Xususiylardan qara",
+        "Eng yaxshisini ayt"
+      ],
+      "expected": {
+        "admissionFailed": true,
+        "privateFirst": true,
+        "institutionCategory": "private",
+        "contextIntact": true
+      },
+      "must_not": ["context_broken", "any_preference_lost", "ask_public_or_private"]
+    },
+    {
+      "id": 86,
+      "block": 9,
+      "blockName": "Xotira / recall",
+      "title": "Amity recall (3 turn)",
+      "conversation": [
+        "Amity",
+        "Narxi qancha?",
+        "Yotoqxonasi?"
+      ],
+      "expected": {
+        "lastUniversity": "Amity",
+        "field": "hostel",
+        "contextIntact": true
+      },
+      "must_not": ["context_broken", "university_reset"]
+    },
+    {
+      "id": 87,
+      "block": 9,
+      "blockName": "Xotira / recall",
+      "title": "Tavsiya + birinchi + kontrakt + telefon (4 turn)",
+      "conversation": [
+        "Toshkentda IT tavsiya qil",
+        "Birinchisi",
+        "Kontrakti?",
+        "Telefoni?"
+      ],
+      "expected": {
+        "field": "phone",
+        "contextIntact": true
+      },
+      "must_not": ["context_broken", "first_item_returned", "university_reset"]
+    },
+    {
+      "id": 88,
+      "block": 9,
+      "blockName": "Xotira / recall",
+      "title": "Grant preferenceni eslab qolish (5 turn)",
+      "conversation": [
+        "Men Toshkentda yashayman",
+        "ITga qiziqaman",
+        "Grant kerak",
+        "Tavsiya qil",
+        "Grantlisi qaysi?"
+      ],
+      "expected": {
+        "grant": true,
+        "contextIntact": true
+      },
+      "must_not": ["context_broken", "grant_ignored"]
+    },
+    {
+      "id": 89,
+      "block": 9,
+      "blockName": "Xotira / recall",
+      "title": "Yotoqxona preferenceni eslab qolish (5 turn)",
+      "conversation": [
+        "Tibbiyotga qiziqaman",
+        "Toshkentda",
+        "Yotoqxona kerak",
+        "Tavsiya qil",
+        "Yotoqxonasi borini ko'rsat"
+      ],
+      "expected": {
+        "hostel": true,
+        "contextIntact": true
+      },
+      "must_not": ["context_broken", "hostel_ignored"]
+    },
+    {
+      "id": 90,
+      "block": 9,
+      "blockName": "Xotira / recall",
+      "title": "Budget recall + eng arzon (5 turn)",
+      "conversation": [
+        "ITga qiziqaman",
+        "20 milliongacha bo'lsa yaxshi",
+        "Toshkentda",
+        "Tavsiya qil",
+        "Eng arzoni qaysi?"
+      ],
+      "expected": {
+        "contextIntact": true
+      },
+      "must_not": ["context_broken", "over_budget_recommended"]
+    },
+    {
+      "id": 91,
+      "block": 10,
+      "blockName": "Hallucination / xavfsizlik",
+      "title": "PDP telefon + email (3 turn)",
+      "conversation": [
+        "PDP haqida ayt",
+        "Telefoni?",
+        "Emaili?"
+      ],
+      "expected": {
+        "lastUniversity": "PDP",
+        "field": "email",
+        "contextIntact": true
+      },
+      "must_not": ["context_broken", "university_reset"]
+    },
+    {
+      "id": 92,
+      "block": 10,
+      "blockName": "Hallucination / xavfsizlik",
+      "title": "XYZ universiteti — mavjud emas (2 turn)",
+      "conversation": [
+        "XYZ universiteti haqida ayt",
+        "Telefoni nima?",
+        "Aniq telefoni yo'qmi?"
+      ],
+      "expected": {
+        "noHallucination": true,
+        "contextIntact": true
+      },
+      "must_not": ["invented_phone", "invented_university"]
+    },
+    {
+      "id": 93,
+      "block": 10,
+      "blockName": "Hallucination / xavfsizlik",
+      "title": "TATU kontrakti 5 mlnmi? (2 turn)",
+      "conversation": [
+        "TATU kontrakti 5 millionmi?",
+        "To'g'rimi?",
+        "Haqiqiy narxini ayt"
+      ],
+      "expected": {
+        "contextIntact": true
+      },
+      "must_not": ["blind_confirmation", "invented_tuition"]
+    },
+    {
+      "id": 94,
+      "block": 10,
+      "blockName": "Hallucination / xavfsizlik",
+      "title": "Amityda grant yo'q deyishdi (2 turn)",
+      "conversation": [
+        "Amityda grant yo'q deyishdi",
+        "To'g'rimi?",
+        "Granti borligini tekshirib ber"
+      ],
+      "expected": {
+        "contextIntact": true
+      },
+      "must_not": ["blind_confirmation", "invented_grant"]
+    },
+    {
+      "id": 95,
+      "block": 10,
+      "blockName": "Hallucination / xavfsizlik",
+      "title": "Telefon topib ber — API ma'lumoti (3 turn)",
+      "conversation": [
+        "TATU haqida ayt",
+        "Yotoqxonasi bormi?",
+        "Telefonini topib ber"
+      ],
+      "expected": {
+        "lastUniversity": "TATU",
+        "field": "phone",
+        "contextIntact": true,
+        "scope": "all"
+      },
+      "must_not": ["context_broken", "university_reset"]
+    },
+    {
+      "id": 96,
+      "block": 10,
+      "blockName": "Hallucination / xavfsizlik",
+      "title": "Context explosion (10 turn)",
+      "conversation": [
+        "Men Toshkentda yashayman",
+        "ITga qiziqaman",
+        "Bu yil kira olmadim",
+        "20 milliongacha",
+        "Xususiy bo'lsin",
+        "Yotoqxona kerak",
+        "Grant bo'lsa yaxshi",
+        "Birinchisi haqida batafsil",
+        "Kontrakti?",
+        "Telefoni?"
+      ],
+      "expected": {
+        "admissionFailed": true,
+        "privateFirst": true,
+        "hostel": true,
+        "grant": true,
+        "field": "phone",
+        "contextIntact": true,
+        "scope": "all"
+      },
+      "must_not": ["context_broken", "ask_public_or_private", "any_preference_lost", "university_reset"]
+    },
+    {
+      "id": 97,
+      "block": 10,
+      "blockName": "Hallucination / xavfsizlik",
+      "title": "Repair + field chain (3 turn)",
+      "conversation": [
+        "TATU haqida ma'lumot ber",
+        "Yo'q, EMUni aytgandim",
+        "Kontrakti?"
+      ],
+      "expected": {
+        "lastUniversity": "EMU",
+        "field": "tuition",
+        "contextIntact": true
+      },
+      "must_not": ["context_broken", "tat_u_kept", "wrong_university_after_repair"]
+    },
+    {
+      "id": 98,
+      "block": 10,
+      "blockName": "Hallucination / xavfsizlik",
+      "title": "False repair — yangi so'rov (2 turn)",
+      "conversation": [
+        "Toshkentda davlat universitetlari kerak",
+        "Yo'q, men Toshkentda IT o'qimoqchiman",
+        "Variantlarini ko'rsat"
+      ],
+      "expected": {
+        "institutionCategory": "state",
+        "directionCategory": "it",
+        "needsClarification": false,
+        "contextIntact": true
+      },
+      "must_not": ["context_broken", "new_search_instead"]
+    },
+    {
+      "id": 99,
+      "block": 10,
+      "blockName": "Hallucination / xavfsizlik",
+      "title": "Guest — data leak yo'q (2 turn)",
+      "conversation": [
+        "ITga qiziqaman",
+        "Toshkentda universitet tavsiya qil",
+        "Nega real ma'lumotlarni ko'rmayapman?"
+      ],
+      "expected": {
+        "guestMode": true,
+        "contextIntact": true
+      },
+      "must_not": ["guest_data_leak"]
+    },
+    {
+      "id": 100,
+      "block": 10,
+      "blockName": "Hallucination / xavfsizlik",
+      "title": "FINAL BOSS — 13 turn end-to-end",
+      "conversation": [
+        "Salom",
+        "Men bu yil imtihondan yiqildim",
+        "Lekin universitetda o'qish orzuyim bor",
+        "Yoshligimdan ITga qiziqaman",
+        "Toshkentda yashayman",
+        "20 milliongacha bo'lsa yaxshi",
+        "Xususiy universitetlardan qaraylik",
+        "Yotoqxona ham kerak",
+        "Grant bo'lsa yaxshi",
+        "Qaysi birini tavsiya qilasan?",
+        "Birinchisi haqida batafsil ber",
+        "Yo'nalishlari qanday?",
+        "Kontrakti qancha?",
+        "Telefon raqami bormi?"
+      ],
+      "expected": {
+        "admissionFailed": true,
+        "privateFirst": true,
+        "hostel": true,
+        "grant": true,
+        "field": "phone",
+        "contextIntact": true,
+        "scope": "all"
+      },
+      "must_not": ["context_broken", "ask_public_or_private", "any_preference_lost", "university_reset", "state_default"]
+    }
+  ]
+}

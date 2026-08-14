@@ -91,6 +91,29 @@ export function normalizeUserText(text: string): string {
   t = t.replace(/\bgrantla\b/gi, 'grantlar');
   t = t.replace(/\bkontraktla\b/gi, 'kontraktlar');   // "kontraktla" → "kontraktlar" (r tushib qolishi)
 
+  // kategoriya typolari — xususiy juda ko'p xato yoziladi:
+  // "hususiy" (x→h), "xusisiy" (u→i), "xususy" (i tushib qolgan)
+  t = t.replace(/hususiy/gi, 'xususiy');
+  t = t.replace(/xusisiy/gi, 'xususiy');
+  t = t.replace(/xususy/gi, 'xususiy');
+  t = t.replace(/hususy/gi, 'xususiy');
+  // "davliniki" → "davlatniki" (davlatniki = davlatga tegishli) — typo
+  t = t.replace(/davliniki/gi, 'davlatniki');
+
+  // yotoqxona typolari — "hona" shakli juda keng tarqalgan ("yotoqhonasi")
+  t = t.replace(/yotoqhon/gi, 'yotoqxon');
+
+  // STAGE 18 (blind): kasb / yo'nalish so'zlaridagi real typos
+  t = t.replace(/doktir/gi, 'doktor');
+  t = t.replace(/tibbiet/gi, 'tibbiyot');
+  t = t.replace(/tibbet/gi, 'tibbiyot');
+  t = t.replace(/pedagogka/gi, 'pedagogika');
+  t = t.replace(/iqtisodch\b/gi, 'iqtisodchi');
+  t = t.replace(/hohlayman/gi, 'xohlayman');
+  t = t.replace(/hohlamayman/gi, 'xohlamayman');
+  t = t.replace(/\bokish\b/gi, "o'qish");
+  t = t.replace(/okitiladi/gi, "o'qitiladi");
+
   // grant typolari — "narxlaari", "grantla" aralashmalari
   t = t.replace(/narxlaa?ri/gi, 'narxlari');      // "narxlaari" → "narxlari"
   t = t.replace(/narxalari/gi, 'narxlari');        // "narxalari" → "narxlari"

@@ -14,7 +14,7 @@
 const UZ_SUFFIXES =
   '(?:' +
   'lar(?:imiz|ingiz|i|ini|ida|idan|iga|ining|im)?|' +
-  'ning|niki|dagi|dagilari|da|dan|ga|ni|' +
+  'ning|niki|dagi|dagilari|da|dan|ga|ka|ni|' +
   'imiz|ingiz|larimiz|laringiz|im|ing|i|miz|ngiz|siz|' +
   'li|lik|chilik|chi|shunos|shunoslik|' +
   ')*';
@@ -146,6 +146,21 @@ export function isAiBiomedicalContext(message: string): boolean {
   return hasAI && hasBioMed;
 }
 
+/**
+ * STAGE 19 (adversarial): sinonimiya mention'i NEGATIV ekanini aniqlaydi.
+ * "IT emas" / "tibbiyot kerak emas" / "iqtisodga qiziqmayman" — negativ
+ * fe'l sinonimiya so'zidan keyin kelsa, bu kategoriya EMAS (user rad etmoqda).
+ * "IT ga qiziqaman" (ijobiy) esa kategoriya sifatida qoladi.
+ */
+function isSynonymNegated(message: string, syn: string): boolean {
+  const escaped = syn.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const re = new RegExp(`\\b${escaped}${UZ_SUFFIXES}\\b`, 'i');
+  const m = message.match(re);
+  if (!m || m.index === undefined) return false;
+  const after = message.slice(m.index + m[0].length, m.index + m[0].length + 45);
+  return /^\s*(?:emas|qiziqmayman|qiziqtirmaydi|yoqtirmayman|yoqmaydi|xohlamayman|istamayman|bo'lmasin|kerak\s+emas|shart\s+emas|keragi\s+yo'q)/i.test(after);
+}
+
 export function detectDirectionCategory(message: string): string | null {
   if (!message) return null;
   const lower = message.toLowerCase();
@@ -158,7 +173,7 @@ export function detectDirectionCategory(message: string): string | null {
 
   for (const [category, synonyms] of Object.entries(DIRECTION_SYNONYMS)) {
     for (const syn of synonyms) {
-      if (buildSynonymPattern(syn).test(lower)) return category;
+      if (buildSynonymPattern(syn).test(lower) && !isSynonymNegated(lower, syn)) return category;
     }
   }
   return null;

@@ -35,6 +35,10 @@ export type RequestField =
   | "summary"
   | null;
 
+// Typo-tolerant field aniqlash uchun import
+// ("yotoqhonasi bormi" → "yotoqxonasi bormi")
+import { normalizeUserText } from "./text-normalizer";
+
 /** Barcha field so'zlarini (egalik/ko'plik-egalik shakllari) aniqlash. */
 const FIELD_PATTERNS: Array<{ field: Exclude<RequestField, null>; pattern: RegExp }> = [
   // DIQQAT: tartib muhim — "narx" "narxi" dan oldin tekshirilmaydi (regex
@@ -42,7 +46,7 @@ const FIELD_PATTERNS: Array<{ field: Exclude<RequestField, null>; pattern: RegEx
   // "kontraktlar") EMAS — ular umumiy katalog.
   {
     field: "directions",
-    pattern: /\b(yo'nalishlari|yo'nalishi|fakultetlari|fakulteti|dasturlari|dasturi)\b/i,
+    pattern: /\b(yo'nalishlari|yo'nalishi|yo'nalish|fakultetlari|fakulteti|dasturlari|dasturi)\b/i,
   },
   {
     field: "phone",
@@ -70,7 +74,7 @@ const FIELD_PATTERNS: Array<{ field: Exclude<RequestField, null>; pattern: RegEx
   },
   {
     field: "email",
-    pattern: /\b(electronic\s+pochta|elektron\s+pochta|elektron\s+pochta(si)?|pochta(si)?|email|e-mail)\b/i,
+    pattern: /\b(electronic\s+pochta|elektron\s+pochta|elektron\s+pochta(si)?|pochta(si)?|emaili|e-maili|email|e-mail)\b/i,
   },
   {
     field: "address",
@@ -85,7 +89,10 @@ const FIELD_PATTERNS: Array<{ field: Exclude<RequestField, null>; pattern: RegEx
  * Topilmasa / ko'plik umumiy so'z bo'lsa → null.
  */
 export function detectRequestField(message: string): RequestField {
-  const m = message.trim();
+  // Typo tolerance: "yotoqhonasi" → "yotoqxonasi", "xusisiy" → "xususiy"
+  // (field so'zlari ham xato yozilishi mumkin — typo sabab field taninmay
+  // qolib, generic "topa olmadim" qaytmasligi kerak).
+  const m = normalizeUserText(message.trim());
   if (!m) return null;
 
   // Summary — "haqida / ma'lumot / batafsil / info" — to'liq karta so'rovi.
@@ -113,7 +120,10 @@ export function detectRequestField(message: string): RequestField {
  * agent "Qaysi universitet nazarda tutilgan?" deb so'raydi (user qoidasi 8).
  */
 export function isBareFieldRequest(message: string): boolean {
-  const m = message.trim();
+  // MUHIM (Fix #66): matn normalize qilinishi SHART — "yotoqhonasi bormi"
+  // kabi typo'lar field so'zi sifatida tan olinmasa, leftovers to'la bo'lib
+  // false qaytardi (field detected bo'lsa ham clarification bermay ketardi).
+  const m = normalizeUserText(message.trim());
   if (!m || m.split(/\s+/).length > 5) return false;
 
   const field = detectRequestField(m);

@@ -13,7 +13,7 @@
     "responseStrategy": "template",
     "selfComplete": true,
     "patterns": [
-      "^(salom|assalomu\\s*alaykum|hayrli\\s*kun|hello|hi|hey|good\\s+morning|good\\s+evening|vaalom)\\s*[!.,?]*\\s*$"
+      "^(salom|assalomu\\s*alaykum|hayrli\\s*kun|hello|hi|hey|good\\s+morning|good\\s+evening|vaalom|xayr|hayr)\\s*[!.,?]*\\s*$"
     ],
     "keywords": []
   },
@@ -55,10 +55,12 @@
     "responseStrategy": "hybrid",
     "selfComplete": false,
     "patterns": [
-      "(solishtir|taqqosla|compare|comparison|farqi)",
+      "(solishtir|taqqosla|compare|comparison)",
       "^(?!.*(?:yo'nalish|yonalish)).*qaysi\\s+(?:\\w+\\s+)?(yaxshiroq|yaxshi|afzal|arzon|sifatli)",
       "\\bvs\\b|versus|\\bva\\s+\\b.*\\b(ning\\s+farqi|solishtir)",
-      "\\b(TATU|TUIT|INHA|WIUT|PDP|MDIS|Amity|Westminster|amity|westminster|TTA|SamDU|BuxDU)\\s*(yoki|or)\\s*\\w+",
+      "\\b(TATU|TUIT|INHA|WIUT|PDP|MDIS|Amity|Westminster|amity|westminster|TTA|SamDU|BuxDU|EMU|TAFU|TMI|TDIU|TDTU|TKXU)\\w*\\s+(?:yaxshimi|yaxshiroqmi)\\s+(?:yoki|or)\\s*\\w+",
+      "\\b(TATU|TUIT|INHA|WIUT|PDP|MDIS|Amity|Westminster|amity|westminster|TTA|SamDU|BuxDU|EMU|TAFU|TMI|TDIU|TDTU|TKXU)\\s*(yoki|or)\\s*\\w+",
+      "\\b[A-Z]{2,8}\\w*\\s+(?:yaxshimi|yaxshiroqmi)\\s+(?:yoki|or)\\s+[A-Z]{2,8}\\w*\\b",
       "(davlat|xususiy|xalqaro)(mi)\\s*(yoki|or)\\s*(davlat|xususiy|xalqaro)(mi)?"
     ],
     "keywords": []
@@ -216,10 +218,9 @@
       "(bu\\s+yil|yil)\\s+(o'qishga|oqishga)\\s+(kirmoqchi|kirmoqchiman|kirmoqchiman|kiraman|kirishim)",
       "(xorijga|chet\\s+elga|abroad|dunyoga)",
       "(IELTS|TOEFL|SAT|sertifikat)",
-      "(yordam\\s+(bering|ber|kerak)|help)",
       "(matematikam|fizikam|kimyom|biologiyam|inglizim|adabiyotim)",
       "(o'qisam|o'qishim|kirishim)\\s*(kerak|mumkin)?\\s*(olamanmi|bo'ladimi|bo'ladi)",
-      "(eng talab yuqori|talabgir|most demanded|popular|top)",
+      "(eng talab yuqori|talabgir|most demanded|popular|\\btop\\b)",
       "(sirtqi|kechki|masofaviy)\\s*(ta'lim|o'qish|o'qiyman)?"
     ],
     "keywords": []
@@ -232,7 +233,7 @@
     "dataIntent": true,
     "selfComplete": false,
     "patterns": [
-      "(yo'nalish|yonalish|direction|mutaxassislik|dastur|program|kurs)",
+      "(yo'nalish|yonalish|direction|mutaxassislik|dastur|program|kurs|\\bfan(lar|lari|larini|lariga|larida|laridan|larining)?\\b)",
       "qaysi\\s+(yo'nalish|yonalish|fan|soha)",
       "(o'qish|o'qi)\\s+(uchun|kerak|mumkin)",
       "\\b(IT|dasturlash|injiniring)\\b",
@@ -279,7 +280,7 @@
       "(qabul|admission|acceptance|hujjat|ro'yxatdan\\s+o'tish)",
       "(qachon|muddat|deadline|start|tugash)\\s+(qabul|admission)",
       "(ochiq|yopiq|davom|tugagan)(mi|midi)?\\s*(qabul|admission)",
-      "(kirish|o'tish|ball|bala)\\s*(ballari?|bal)?",
+      "\\b(kirish|o'tish|ball|bala)\\b\\s*(ballari?|bali)?",
       "(qanday|qaysi)\\s+fan(lar)?\\s+(topshiraman|topshirish|kerak)",
       "\\b(imtihon|test)\\b\\s*(qachon|kuni|muddat|sanasi)?",
       "(qabul|topshirish|hujjat)\\s+(qanday|qachon|muddat)",

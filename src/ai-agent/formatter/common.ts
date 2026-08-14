@@ -112,8 +112,83 @@ Yoki menga nima izlayotganingizni yozing, men sizga yordam beraman.
  * GENERAL CHAT (intent=general_chat) — ruhiy qo'llab-quvvatlash / umumiy maslahat.
  * Tool chaqirilmaydi (handler=none) — bu oddiy suhbat javobi. LLM bo'lmasa ham
  * template shu yerda ishlaydi: insoniy, iliq, "topilmadi" demaydi.
+ *
+ * STAGE 14g (user qoidasi): general_chat shabloni ENDI PROFILGA QARAYDI!
+ * Foydalanuvchi "imtihondan yiqildim" degan bo'lsa (profile.admissionFailed),
+ * "Sizni tushunaman... Xavotir olmang" kabi GENERIC matn berilmaydi — o'rniga
+ * vaziyatga mos maslahat: xususiy/xalqaro universitetlar qabul imkoniyati
+ * berishini aytib, keyingi savolga yo'naltiradi (davlat/xususiy so'ralmaydi).
+ * Profil bo'lmasa (yoki bo'sh bo'lsa) — eski iliq umumiy javob qaytadi.
  */
-export function generalChatResponse(language: string): string {
+export function generalChatResponse(language: string, profile?: Record<string, any> | null): string {
+  const admissionFailed = profile?.admissionFailed === true;
+  const wantsToStudy = profile?.wantsToStudy === true;
+
+  // STAGE 14g: imtihondan yiqilgan foydalanuvchi — vaziyatga mos javob
+  if (admissionFailed) {
+    if (language === "ru") {
+      return `Понимаю вас. 😊 Это не конец — у вас есть реальные возможности продолжить учёбу.
+
+Раз вы не прошли в государственный вуз, предлагаю рассмотреть **частные и международные университеты** — там приём часто проходит по собеседованию или тесту, без высоких проходных баллов.
+
+Чтобы найти лучшие варианты, подскажите:
+1️⃣ **В каком городе хотите учиться?** (Ташкент, Самарканд, Бухара...)
+2️⃣ **Какое направление интересует?** (IT, медицина, экономика, педагогика...)
+
+Я подберу для вас подходящие варианты! 🎯`;
+    }
+    if (language === "en") {
+      return `I hear you. 😊 This isn't the end — you have real options to continue your studies.
+
+Since you didn't get into a state university, let's look at **private and international universities** — admission there is often via interview or test, without high cutoff scores.
+
+To find the best options, tell me:
+1️⃣ **Which city would you like to study in?** (Tashkent, Samarkand, Bukhara...)
+2️⃣ **Which field interests you?** (IT, medicine, economics, education...)
+
+I'll find suitable options for you! 🎯`;
+    }
+    return `Sizni tushunaman. 😊 Bu tugash emas — o'qishni davom ettirish uchun real imkoniyatlaringiz bor.
+
+Davlat OTMlariga kira olmaganingiz uchun, avvalo **xususiy va xalqaro universitetlarni** ko'rib chiqishni tavsiya qilaman — ularda qabul ko'pincha suhbat yoki test asosida o'tadi, yuqori o'tish ballari talab qilinmaydi.
+
+Sizga mos variantlarni topish uchun ayting:
+1️⃣ **Qaysi shahar yoki viloyatda o'qimoqchisiz?** (Toshkent, Samarqand, Buxoro...)
+2️⃣ **Qanday yo'nalish qiziqtiradi?** (IT, tibbiyot, iqtisod, pedagogika...)
+
+Men sizga mos variantlarni topib beraman! 🎯`;
+  }
+
+  // O'qishni davom ettirishni xohlaydigan foydalanuvchi — yo'naltiruvchi javob
+  if (wantsToStudy && !admissionFailed) {
+    if (language === "ru") {
+      return `Отлично, что хотите продолжить учёбу! 😊 Давайте подберём для вас лучший вариант.
+
+Подскажите:
+1️⃣ **Какое направление вас интересует?** (IT, медицина, экономика, педагогика...)
+2️⃣ **В каком городе хотите учиться?**
+
+И я найду подходящие университеты и варианты для вас! 🎯`;
+    }
+    if (language === "en") {
+      return `Great that you want to continue studying! 😊 Let's find the best option for you.
+
+Tell me:
+1️⃣ **Which field interests you?** (IT, medicine, economics, education...)
+2️⃣ **Which city would you like to study in?**
+
+I'll find suitable universities for you! 🎯`;
+    }
+    return `O'qishni davom ettirishni xohlaganingiz juda yaxshi! 😊 Keling, sizga mos variantni birga topamiz.
+
+Ayting:
+1️⃣ **Qanday yo'nalish qiziqtiradi?** (IT, tibbiyot, iqtisod, pedagogika...)
+2️⃣ **Qaysi shaharda o'qimoqchisiz?**
+
+Men sizga mos universitetlarni topib beraman! 🎯`;
+  }
+
+  // Oddiy holat — iliq umumiy javob
   if (language === "ru") {
     return `Понимаю вас. 😊 Расскажите подробнее — я здесь, чтобы помочь.
 

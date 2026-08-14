@@ -121,7 +121,7 @@ export function buildCompactContext(toolResults: ToolResult[]): string {
           if (Object.keys(known).length > 0) {
             parts.push(`Ma'lum bo'lganlar: ${JSON.stringify(known)}`);
           }
-          parts.push("INSTRUCTION: Foydalanuvchiga FAQAT BIRINCHI yetishmayotgan ma'lumotni tabiiy tilda bitta savol qilib bering. Navbat: 1) region → 'Qaysi shahar yoki viloyatda o'qimoqchisiz?', 2) directionCategory → 'Qanday yo'nalish sizni qiziqtiradi?', 3) institutionCategory → davlat/xususiy — lekin foydalanuvchi imtihondan yiqilgan bo'lsa (vaziyat blokida admission_failed) buni SO'RAMANG, xususiy/xalqaro ustuvorligini taklif qiling. Agar vaziyat bloki bo'lsa, avval vaziyatni 1-2 gapda tan oling, keyin bitta savol bering.");
+          parts.push("INSTRUCTION: Foydalanuvchiga FAQAT BIRINCHI yetishmayotgan ma'lumotni so'rang. Javob tabiiy, insoniy suhbat bo'lsin — ROBOTIK emas, quruq ro'yxat emas. Avval foydalanuvchining holatiga qisqa moslashgan kirish bilan boshlang (masalan: imtihondan o'tganini tabriklang, yiqilganini tushunganingizni bildiring, yoki yordam berishga tayyor ekaningizni ayting) — 1-2 gap, keyin FAQAT bitta savol bering. Navbat: 1) region → shahar/viloyat haqida, 2) directionCategory → yo'nalish haqida, 3) institutionCategory → davlat/xususiy — lekin foydalanuvchi imtihondan yiqilgan bo'lsa (vaziyat blokida admission_failed) buni SO'RAMANG, xususiy/xalqaro ustuvorligini taklif qiling. Savolni bitta soddaroq jumla bilan tugating.");
         } else if (Array.isArray(d?.recommendations) && d.recommendations.length > 0) {
           const bestId = d.bestUniversity?.id;
           parts.push(`Tavsiyalar (${d.recommendations.length} ta, backend ball bilan saralangan):`);
@@ -142,12 +142,16 @@ export function buildCompactContext(toolResults: ToolResult[]): string {
               const weakNote = uni.score.breakdown?.weakness > 0
                 ? `, zaif fan chegirmasi -${uni.score.breakdown.weakness}`
                 : '';
-              parts.push(`${compact}${isBest ? " [BEST — eng yuqori ball, asosiy variant]" : ""}\n   Ball: ${uni.score.total}/100 (yo'nalish ${uni.score.breakdown?.direction || 0}, byudjet ${uni.score.breakdown?.budget || 0}, hudud ${uni.score.breakdown?.region || 0}, bonus ${uni.score.breakdown?.bonus || 0}${weakNote})`);
+              const qualityNote = uni.score.breakdown?.quality > 0
+                ? `, sifat +${uni.score.breakdown.quality}`
+                : '';
+              parts.push(`${compact}${isBest ? " [BEST — eng yuqori ball, asosiy variant]" : ""}\n   Ball: ${uni.score.total}/100 (yo'nalish ${uni.score.breakdown?.direction || 0}, byudjet ${uni.score.breakdown?.budget || 0}, hudud ${uni.score.breakdown?.region || 0}, bonus ${uni.score.breakdown?.bonus || 0}${qualityNote}${weakNote})`);
               // Fix (nega aynan shu): backend hisoblagan sabablarni ham LLM'ga
               // beramiz — LLM ularni izohlab, "nega aynan shu universitet"
               // degan savolga faktlar bilan javob bera oladi.
               if (uni.score.reasons?.length) {
-                parts.push(`   Sabablar: ${uni.score.reasons.slice(0, 3).join("; ")}`);
+                // STAGE 17: 4 taga ko'tarildi — sifat sabablari ham LLM'ga boradi
+                parts.push(`   Sabablar: ${uni.score.reasons.slice(0, 4).join("; ")}`);
               }
               if (uni.score.nuances?.length) {
                 parts.push(`   E'tibor: ${uni.score.nuances.slice(0, 2).join("; ")}`);

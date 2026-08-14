@@ -57,16 +57,42 @@ class ProviderManager {
     return (this.circuitUntil[name] || 0) > Date.now();
   }
 
-  /** Provider limit xatosi berganida chaqiriladi — 2 daqiqaga circuit ochamiz */
-  private openCircuit(name: AIProvider): void {
-    this.circuitUntil[name] = Date.now() + 2 * 60 * 1000;
-    console.log(`[CircuitBreaker] ${name} limit xatosi — 2 daqiqa o'tkazib yuboriladi`);
+  /** Provider limit xatosi berganida chaqiriladi — circuit ochamiz */
+  private openCircuit(name: AIProvider, retryAfterMs?: number): void {
+    // TPD (tokens per day) limiti — kunlik: "try again in 52m" → shuncha kutamiz.
+    // Oddiy rate limit → default 2 daqiqa. Maksimum 1 soat (server qayta ishga
+    // tushganda circuit tozalanadi).
+    const ms = Math.min(Math.max(retryAfterMs || 0, 2 * 60 * 1000), 60 * 60 * 1000);
+    this.circuitUntil[name] = Date.now() + ms;
+    console.log(`[CircuitBreaker] ${name} limit xatosi — ${Math.round(ms / 60000)} daqiqa o'tkazib yuboriladi`);
   }
 
   /** 429 / rate limit / quota / insufficient balance — limit xatosi ekanini aniqlaydi */
   private isLimitError(error: any): boolean {
     const msg = (error?.message || "") + " " + JSON.stringify(error?.response?.data || {});
     return /429|rate ?limit|quota|insufficient|balance/i.test(msg);
+  }
+
+  /**
+   * Limit xatosidan KUTISH VAQTINI ajratadi (ms):
+   * 1) `retry-after` header'i (soniya) — Groq/OpenAI standard
+   * 2) xato matnidagi "try again in 52m24.096s" / "try again in 5s"
+   * Topilmasa → undefined (caller default 2 daqiqa ishlatadi).
+   */
+  private getRetryAfterMs(error: any): number | undefined {
+    try {
+      const header = error?.headers?.get?.("retry-after") ?? error?.headers?.["retry-after"];
+      if (header) {
+        const s = parseInt(String(header), 10);
+        if (!isNaN(s) && s > 0) return s * 1000;
+      }
+      const msg = (error?.message || "") + " " + JSON.stringify(error?.response?.data || {});
+      const m = msg.match(/try again in\s+(\d+)m/i);
+      if (m) return parseInt(m[1], 10) * 60 * 1000;
+      const s = msg.match(/try again in\s+(\d+)s/i);
+      if (s) return parseInt(s[1], 10) * 1000;
+    } catch (e) { /* ignore */ }
+    return undefined;
   }
 
   getActiveProvider(): AIProvider {
@@ -132,24 +158,24 @@ class ProviderManager {
 
     const prompt = buildEntityExtractionPrompt(message, language);
 
-    // Groq birinchi (eng tez, free)
+    // OpenRouter birinchi — user talabi: limit bo'lsa Groq o'rniga OpenRouter ishlatiladi
     // MUHIM: parsed !== null bo'lsa darhol qaytamiz (bo'sh {} ham) — muvaffaqiyatli
     // parse boshqa provider'larni urishni talab qilmaydi (bo'sh merge = no-op).
-    if (this.groqClient && !this.shouldSkipProvider("groq")) {
-      const text = await withTimeout(this.callGroqForEntities(prompt), 6000, "Groq");
-      const parsed = text ? parseEntitiesJSON(text, message) : null;
-      if (parsed !== null) {
-        console.log(`[LLM Entities] Groq orqali: ${JSON.stringify(parsed)}`);
-        return parsed;
-      }
-    }
-
-    // OpenRouter (zaxira — Groq limiti tugaganda)
     if (this.openRouterClient && !this.shouldSkipProvider("openrouter")) {
       const text = await withTimeout(this.callOpenRouterForEntities(prompt), 6000, "OpenRouter");
       const parsed = text ? parseEntitiesJSON(text, message) : null;
       if (parsed !== null) {
         console.log(`[LLM Entities] OpenRouter orqali: ${JSON.stringify(parsed)}`);
+        return parsed;
+      }
+    }
+
+    // Groq (zaxira — OpenRouter limiti tugaganda)
+    if (this.groqClient && !this.shouldSkipProvider("groq")) {
+      const text = await withTimeout(this.callGroqForEntities(prompt), 6000, "Groq");
+      const parsed = text ? parseEntitiesJSON(text, message) : null;
+      if (parsed !== null) {
+        console.log(`[LLM Entities] Groq orqali: ${JSON.stringify(parsed)}`);
         return parsed;
       }
     }
@@ -208,7 +234,11 @@ class ProviderManager {
   private async callOpenRouterForEntities(prompt: string): Promise<string> {
     if (!this.openRouterClient) throw new Error("OpenRouter not initialized");
     const completion = await this.openRouterClient.chat.completions.create({
-      model: process.env.OPENROUTER_MODEL || "openai/gpt-4o-mini",
+      // STAGE 15 (user fix): default model BEPUL — OpenRouter'da kredit
+      // bo'lmasa ham ishlaydi (pullik gpt-4o-mini 402 kreditsiz xato beradi).
+      // openrouter/free — OpenRouter eng yaxshi bepul modelni avtomatik tanlaydi
+      // (gemma-4-26b:free sifat jihatdan past — placeholder chiqarardi).
+      model: process.env.OPENROUTER_MODEL || "openai/gpt-oss-20b:free",
       messages: [
         { role: "system", content: "You are a precise entity extractor. Respond with valid JSON only." },
         { role: "user", content: prompt },
@@ -432,6 +462,21 @@ class ProviderManager {
         intent = followUp.intent;
       }
 
+      // REPAIR-CLARIFICATION (Fix #34): "Yo'q, boshqa universitet" — foydalanuvchi
+      // oldingi universitеtni rad etdi, lekin yangi nom bermadi. augmentFollowUp
+      // nom topa olmaganda clarifyUniversity flag'ini qo'yadi — shu yerda aniq
+      // nom so'raladi (taxmin qilib eski kartani takrorlamaymiz).
+      if (followUp.augmented && followUp.clarifyUniversity) {
+        const content = universityClarificationResponse("universitet", language);
+        console.log(`[RepairClarification] "${userMessage}" — nom yo'q → qaysi universitеt so'raldi`);
+        return {
+          content,
+          intent: intent.intent,
+          toolUsed: "none",
+          provider: "template",
+        };
+      }
+
       // Continuous Profile Update: foydalanuvchining har bir ma'lumoti session profiliga yozib boriladi
       if (sessionContext) {
         sessionContext.recommendationProfile = updateRecommendationProfile(
@@ -477,7 +522,7 @@ class ProviderManager {
         console.log(`[SituationalRec] → recommendation (conversation situation): "${effectiveMessage.substring(0, 70)}"`);
       }
 
-      console.log(`[DEBUG] Final intent: ${intent.intent}, secondaryIntents:`, intent.secondaryIntents, `, effectiveMessage: ${effectiveMessage}`);
+      console.log(`[DEBUG] Final intent: ${intent.intent}, secondaryIntents:`, intent.secondaryIntents ?? [], `, effectiveMessage: ${effectiveMessage}`);
 
       // Step 1.55: FIELD CLARIFICATION (BOSQICH 12 — user qoidasi 8)
       // "Kontrakti qancha?" kabi BARE field so'rovi + lastUniversity YO'Q bo'lsa
@@ -694,19 +739,39 @@ class ProviderManager {
       // yo'nalish? Davlatmi yoki xususiy?") — keyingi javobga asos bo'ladi.
       const needsClarification = toolResults.some((r: any) => r.data?.needsClarification === true);
       if (needsClarification) {
-        // STAGE 14f (user qoidasi): user vaziyati yig'ilgan bo'lsa (admissionFailed /
-        // wantsToStudy / profil), clarification'ni LLM TABIIY TILDA so'raydi —
+        // STAGE 14f + 15 (user qoidasi): clarification'ni LLM TABIIY TILDA so'raydi —
         // "Tushundim. Siz imtihondan o'ta olmaganingizni aytdingiz... avvalo xususiy
         // universitetlarni ko'rib chiqishni tavsiya qilaman. Qaysi shaharda
         // o'qimoqchisiz?" kabi (situatsiya bloki bilan). Quruq template savoli EMAS.
-        // Guest → template (token tejaladi); LLM xato bo'lsa → template fallback.
-        const hasSituation = this.buildUserSituationBlock(sessionContext) !== null;
-        if (hasSituation && this.initialized && sessionContext?.isGuest !== true) {
+        //
+        // STAGE 15 (user qoidasi — "LLM suhbatni olib boradi, template faqat
+        // fallback"): ilgari LLM FAQAT user vaziyati yig'ilgan bo'lsa chaqirilar edi
+        // (hasSituation) — "davlat imtihonlaridan o'tdim, qaysi universitetni
+        // tanlashni bilmayman" kabi oddiy maslahat so'rovida vaziyat yig'ilmasdi va
+        // quruq "Qaysi shahar?" template chiqardi. Endi: clarification'da LLM har
+        // doim sinab ko'riladi (guest'dan tashqari — token tejaladi), template faqat
+        // fallback. LLM conversation history'dan userning holatini o'zi ko'radi.
+        // Xavfsizlik: LLM javobi savol ko'rinishida bo'lmasa → template fallback.
+        if (this.initialized && sessionContext?.isGuest !== true) {
           const hybridResult = await this.tryHybridResponse(intent, toolResults, conversationHistory, userMessage, language, sessionContext);
           // Reviewer fix: LLM javobi savol ko'rinishida EMAS bo'lsa (masalan
           // "Toshkent eng yaxshi variant") — template fallback (noto'g'ri javob
           // userga bormasin). Faqat LLM xatosi emas, sifatsiz javob ham fallback.
-          if (hybridResult !== null && /[?؟]|qaysi|qanday|qanaqa|necha\b|so'ray|so'rayman|bering|ayting|aytib bering/i.test(hybridResult.content)) {
+          // STAGE 15 (user qoidasi — "LLM suhbatni olib boradi"): javobning O'ZI
+          // savol ko'rinishida bo'lmasa ham ("ayting", "tanlang" kabi yo'naltiruvchi
+          // iboralar bilan tugasa) qabul qilinadi — LLM tabiiy suhbatda har doim
+          // "?" qo'ymasligi mumkin.
+          // STAGE 17 (user qoidasi — "yiqilgan bo'lsa xususiy taqdim qiladi"):
+          // yiqilgan user uchun clarification'da xususiy/alternativa yo'l
+          // ko'rsatilishi SHART (backend qoidasi). LLM buni o'tkazib yuborsa
+          // (masalan faqat "qaysi shahar?") → template fallback — u deterministik
+          // intro bilan bir xil ruhda javob beradi ("Avvalo xususiy va xalqaro
+          // universitetlarni ko'rib chiqish mumkin...").
+          const admissionClarify = toolResults.some(
+            (r: any) => r.tool === "recommend" && r.data?.needsClarification === true
+          ) && sessionContext?.recommendationProfile?.admissionFailed === true;
+          const privatePathMentioned = !admissionClarify || (hybridResult !== null && /xususiy|alternativa|imkoniyat|variant|ochiq/i.test(hybridResult.content));
+          if (hybridResult !== null && privatePathMentioned && /[?؟]|qaysi|qanday|qanaqa|necha\b|so'ray|so'rayman|bering|ayting|aytib bering|tanlang|aytaversangiz|bilishim\s+kerak|yordam\s+ber/i.test(hybridResult.content)) {
             console.log(`[DEBUG] Situational clarification via LLM (${hybridResult.provider})`);
             return {
               content: hybridResult.content,
@@ -717,7 +782,7 @@ class ProviderManager {
           }
           console.log(`[DEBUG] LLM clarification savol emas yoki xato — template fallback`);
         }
-        const content = this.getTemplateResponse(intent.intent, toolResults, userMessage, language, intent.entities, intent.entityConfidence);
+        const content = this.getTemplateResponse(intent.intent, toolResults, userMessage, language, intent.entities, intent.entityConfidence, sessionContext?.recommendationProfile);
         console.log(`[DEBUG] needsClarification=true — template clarification savollari ishlatiladi`);
         return {
           content,
@@ -728,7 +793,7 @@ class ProviderManager {
       }
 
       if (isDataIntent && !hasRealData) {
-        const content = this.getTemplateResponse(intent.intent, toolResults, userMessage, language, intent.entities, intent.entityConfidence);
+        const content = this.getTemplateResponse(intent.intent, toolResults, userMessage, language, intent.entities, intent.entityConfidence, sessionContext?.recommendationProfile);
         console.log(`[DEBUG] Using template response (no data found)`);
         // CACHE: "topilmadi" javoblari ham cache qilinadi — takroriy bo'sh so'rovlar API'ga bormaydi
         if (cacheStrategy === "template") {
@@ -749,7 +814,7 @@ class ProviderManager {
       }
 
       if (intent.intent === "greeting") {
-        const content = this.getTemplateResponse(intent.intent, toolResults, userMessage, language);
+        const content = this.getTemplateResponse(intent.intent, toolResults, userMessage, language, undefined, undefined, sessionContext?.recommendationProfile);
         console.log(`[DEBUG] Using template response (greeting)`);
         return {
           content,
@@ -771,7 +836,7 @@ class ProviderManager {
       // Natija: token 90-95% tejaladi, javoblar tezroq, API limitlari kam tugaydi.
       // (responseStrategy Step 1.7 da e'lon qilingan — bu yerda qayta e'lon qilinmaydi)
       if (isDataIntent && hasRealData && responseStrategy === "template") {
-        const content = this.getTemplateResponse(intent.intent, toolResults, userMessage, language, intent.entities, intent.entityConfidence);
+        const content = this.getTemplateResponse(intent.intent, toolResults, userMessage, language, intent.entities, intent.entityConfidence, sessionContext?.recommendationProfile);
         console.log(`[DEBUG] Using template response (data intent, strategy=template) — LLM chaqirilmadi`);
         // CACHE LAYER: template javobni cache ga yozamiz — keyingi bir xil so'rov API'ga bormaydi
         responseCache.set(cacheKey, {
@@ -808,7 +873,7 @@ class ProviderManager {
           };
         }
         // LLM muvaffaqiyatsiz → template fallback
-        const content = this.getTemplateResponse(intent.intent, toolResults, userMessage, language, intent.entities, intent.entityConfidence);
+        const content = this.getTemplateResponse(intent.intent, toolResults, userMessage, language, intent.entities, intent.entityConfidence, sessionContext?.recommendationProfile);
         console.log(`[DEBUG] HYBRID LLM failed — using template fallback`);
         return {
           content,
@@ -819,7 +884,7 @@ class ProviderManager {
       }
 
       if (!this.initialized) {
-        const content = this.getTemplateResponse(intent.intent, toolResults, userMessage, language, intent.entities, intent.entityConfidence);
+        const content = this.getTemplateResponse(intent.intent, toolResults, userMessage, language, intent.entities, intent.entityConfidence, sessionContext?.recommendationProfile);
         console.log(`[DEBUG] Using template response (no provider)`);
         return {
           content,
@@ -838,26 +903,7 @@ class ProviderManager {
       // Try providers in order
       const errors: string[] = [];
 
-      // Try Groq first (fastest, free) — limit xatosi bo'lsa circuit breaker ishlaydi
-      if (this.groqClient && !this.shouldSkipProvider("groq")) {
-        try {
-          console.log(`[DEBUG] Trying Groq...`);
-          const result = await this.callGroq(systemPrompt, context, conversationHistory, userMessage);
-          console.log(`[DEBUG] Groq response successful`);
-          return {
-            ...result,
-            intent: intent.intent,
-            toolUsed: toolResults.length > 0 ? toolResults.map((r: any) => r.tool).filter(Boolean).join(", ") : "none",
-            provider: "groq",
-          };
-        } catch (error: any) {
-          errors.push(`Groq: ${error.message}`);
-          console.error("[Groq Error]", error);
-          if (this.isLimitError(error)) this.openCircuit("groq");
-        }
-      }
-
-      // Try OpenRouter next (zaxira — Groq limiti tugaganda ishlaydi)
+      // Try OpenRouter first — user talabi: limit bo'lsa Groq o'rniga OpenRouter ishlatiladi
       if (this.openRouterClient && !this.shouldSkipProvider("openrouter")) {
         try {
           console.log(`[DEBUG] Trying OpenRouter...`);
@@ -872,7 +918,26 @@ class ProviderManager {
         } catch (error: any) {
           errors.push(`OpenRouter: ${error.message}`);
           console.error("[OpenRouter Error]", error);
-          if (this.isLimitError(error)) this.openCircuit("openrouter");
+          if (this.isLimitError(error)) this.openCircuit("openrouter", this.getRetryAfterMs(error));
+        }
+      }
+
+      // Try Groq next (zaxira — OpenRouter limiti tugaganda ishlaydi)
+      if (this.groqClient && !this.shouldSkipProvider("groq")) {
+        try {
+          console.log(`[DEBUG] Trying Groq...`);
+          const result = await this.callGroq(systemPrompt, context, conversationHistory, userMessage);
+          console.log(`[DEBUG] Groq response successful`);
+          return {
+            ...result,
+            intent: intent.intent,
+            toolUsed: toolResults.length > 0 ? toolResults.map((r: any) => r.tool).filter(Boolean).join(", ") : "none",
+            provider: "groq",
+          };
+        } catch (error: any) {
+          errors.push(`Groq: ${error.message}`);
+          console.error("[Groq Error]", error);
+          if (this.isLimitError(error)) this.openCircuit("groq", this.getRetryAfterMs(error));
         }
       }
 
@@ -891,7 +956,7 @@ class ProviderManager {
         } catch (error: any) {
           errors.push(`DeepSeek: ${error.message}`);
           console.error("[DeepSeek Error]", error);
-          if (this.isLimitError(error)) this.openCircuit("deepseek");
+          if (this.isLimitError(error)) this.openCircuit("deepseek", this.getRetryAfterMs(error));
         }
       }
 
@@ -933,7 +998,7 @@ class ProviderManager {
 
       // All providers failed, use template fallback
       console.error("[Provider] All providers failed:", errors.join("; "));
-      const content = this.getTemplateResponse(intent.intent, toolResults, userMessage, language, intent.entities, intent.entityConfidence);
+      const content = this.getTemplateResponse(intent.intent, toolResults, userMessage, language, intent.entities, intent.entityConfidence, sessionContext?.recommendationProfile);
       return {
         content,
         intent: intent.intent,
@@ -1032,42 +1097,103 @@ class ProviderManager {
     // xususiy universitetlarni ko'rib chiqish mantiqli..."
     // LLM ma'lumotni o'zi o'ylab topmaydi — backend yig'gan holatni izohlaydi.
     const situationBlock = this.buildUserSituationBlock(sessionContext);
-    const contextForLlm = situationBlock
+    let contextForLlm = situationBlock
       ? `${situationBlock}\n\n${compactContext}`
       : compactContext;
+
+    // STAGE 17 — CLARIFICATION + admissionFailed: LLM'ga DETERMINISTIK ko'rsatma.
+    // Bepul modellar ba'zan umumiy "Xavotir olmang... qaysi shahar?" savoliga
+    // tushib qoladi va user imtihondan yiqilganini hisobga olmaydi. Qoida
+    // (template fallback bilan bir xil biznes qoida): yiqilgan user uchun
+    // javobda avvalo XUSUSIY/xalqaro yo'l ochiq ekani ko'rsatilishi shart.
+    // LLM qaror chiqarmaydi — backend qoidasini tabiiy tilda izohlaydi.
+    const recommendToolData = toolResults.find((r: any) => r.tool === "recommend")?.data;
+    const isClarify = recommendToolData?.needsClarification === true;
+    const profileForDirective = sessionContext?.recommendationProfile;
+    if (isClarify && profileForDirective?.admissionFailed === true) {
+      contextForLlm += "\n\nMUHIM (qat'iy qoida): Foydalanuvchi imtihondan o'ta olmagan (admission_failed) — bu vaziyatda davlat/xususiy tanlovi SO'RALMAYDI. Javobingizda avvalo XUSUSIY va xalqaro universitetlar yo'li ochiq ekanini ko'rsating (masalan: 'Avvalo xususiy va xalqaro universitetlarni ko'rib chiqish mumkin — ularning qabuli ko'pincha suhbat yoki test asosida o'tadi'). Shundan keyin kerakli savolni bering.";
+    }
 
     const systemPrompt = contextBuilder.buildSystemPrompt(language);
     const errors: string[] = [];
 
-    // Groq birinchi — limit xatosi bo'lsa circuit breaker ishlaydi
-    if (this.groqClient && !this.shouldSkipProvider("groq")) {
-      try {
-        console.log(`[Hybrid] Trying Groq (context: ${contextForLlm.length} chars${situationBlock ? ", situation included" : ""})`);
-        const result = await this.callGroq(systemPrompt, contextForLlm, conversationHistory, userMessage);
-        if (result.content && result.content.trim().length > 20) {
-          console.log(`[Hybrid] Groq response successful`);
-          return { content: result.content, provider: "groq" };
-        }
-      } catch (error: any) {
-        errors.push(`Groq: ${error.message}`);
-        console.error("[Hybrid Groq Error]", error);
-        if (this.isLimitError(error)) this.openCircuit("groq");
+    // STAGE 15 (fix): gpt-oss-20b bepul model ba'zan bitta so'zni qayta-qayta
+    // takrorlab yuboradi ("kredit-kredit-kredit...") — bu buzilgan javob.
+    // Repetition tekshiruvi: 5+ marta takrorlangan so'z aniqlansa, javob
+    // qabul qilinmaydi va keyingi provider/template ishlaydi.
+    const hasRepetition = (text: string): boolean => {
+      if (!text) return false;
+      const norm = text.replace(/[.,!?;:()\-–—]+/g, " ").replace(/\s+/g, " ").trim();
+      // 1) ketma-ket takrorlangan so'z ("kredit kredit kredit...")
+      if (/\b(\w{3,})(?:\s+\1){4,}/i.test(norm)) return true;
+      // 2) tire bilan takrorlangan so'z ("kredit-kredit-kredit...")
+      if (/\b(\w{3,})(?:-\1){4,}/i.test(text)) return true;
+      return false;
+    };
+    // STAGE 15 (fix): recommend tool ma'lumot bergan bo'lsa, LLM javobida
+    // HECH BO'LMASA BIRTA universitet nomi chiqishi kerak. gpt-oss-20b bepul
+    // model ba'zan ro'yxatni chiqarmay, umumiy maslahat + savol yozadi
+    // ("Qaysi yo'nalish?") — bu tavsiya javobi EMAS. Bunday javob rad
+    // etiladi va template ishlaydi (u to'g'ri ro'yxat chiqaradi).
+    const recommendData = toolResults.find((r: any) => r.tool === "recommend")?.data;
+    const recommendNames: string[] = [];
+    if (recommendData?.recommendations?.length) {
+      for (const u of recommendData.recommendations) {
+        const n = (u.fullNameUz || u.fullNameEn || u.name || "").trim();
+        if (n) recommendNames.push(n);
       }
     }
+    const isValidResponse = (content: string): boolean => {
+      if (!content || content.trim().length <= 20) return false;
+      if (hasRepetition(content)) return false;
+      // Recommend natijasi bor, lekin LLM javobida bitta ham universitet nomi
+      // chiqmagan bo'lsa → javob ma'lumotni o'tkazib yuborgan (rad etamiz).
+      if (recommendNames.length > 0) {
+        const lower = content.toLowerCase();
+        const anyNameMentioned = recommendNames.some((n) => {
+          const words = n.split(/\s+/).filter((w: string) => w.length > 3);
+          return words.some((w: string) => lower.includes(w.toLowerCase()));
+        });
+        if (!anyNameMentioned) return false;
+      }
+      return true;
+    };
 
-    // OpenRouter backup (Groq limiti tugaganda)
+    // OpenRouter birinchi — user talabi: limit bo'lsa Groq o'rniga OpenRouter ishlatiladi
     if (this.openRouterClient && !this.shouldSkipProvider("openrouter")) {
       try {
-        console.log(`[Hybrid] Trying OpenRouter`);
+        console.log(`[Hybrid] Trying OpenRouter (context: ${contextForLlm.length} chars${situationBlock ? ", situation included" : ""})`);
         const result = await this.callOpenRouter(systemPrompt, contextForLlm, conversationHistory, userMessage);
-        if (result.content && result.content.trim().length > 20) {
+        if (isValidResponse(result.content)) {
           console.log(`[Hybrid] OpenRouter response successful`);
           return { content: result.content, provider: "openrouter" };
+        }
+        if (result.content && result.content.trim().length > 20) {
+          console.log(`[Hybrid] OpenRouter response REJECTED (repetition detected) — boshqa provider`);
         }
       } catch (error: any) {
         errors.push(`OpenRouter: ${error.message}`);
         console.error("[Hybrid OpenRouter Error]", error);
-        if (this.isLimitError(error)) this.openCircuit("openrouter");
+        if (this.isLimitError(error)) this.openCircuit("openrouter", this.getRetryAfterMs(error));
+      }
+    }
+
+    // Groq backup (OpenRouter limiti tugaganda)
+    if (this.groqClient && !this.shouldSkipProvider("groq")) {
+      try {
+        console.log(`[Hybrid] Trying Groq (context: ${contextForLlm.length} chars${situationBlock ? ", situation included" : ""})`);
+        const result = await this.callGroq(systemPrompt, contextForLlm, conversationHistory, userMessage);
+        if (isValidResponse(result.content)) {
+          console.log(`[Hybrid] Groq response successful`);
+          return { content: result.content, provider: "groq" };
+        }
+        if (result.content && result.content.trim().length > 20) {
+          console.log(`[Hybrid] Groq response REJECTED (repetition detected) — boshqa provider`);
+        }
+      } catch (error: any) {
+        errors.push(`Groq: ${error.message}`);
+        console.error("[Hybrid Groq Error]", error);
+        if (this.isLimitError(error)) this.openCircuit("groq", this.getRetryAfterMs(error));
       }
     }
 
@@ -1076,14 +1202,17 @@ class ProviderManager {
       try {
         console.log(`[Hybrid] Trying DeepSeek`);
         const result = await this.callDeepSeek(systemPrompt, contextForLlm, conversationHistory, userMessage);
-        if (result.content && result.content.trim().length > 20) {
+        if (isValidResponse(result.content)) {
           console.log(`[Hybrid] DeepSeek response successful`);
           return { content: result.content, provider: "deepseek" };
+        }
+        if (result.content && result.content.trim().length > 20) {
+          console.log(`[Hybrid] DeepSeek response REJECTED (repetition detected)`);
         }
       } catch (error: any) {
         errors.push(`DeepSeek: ${error.message}`);
         console.error("[Hybrid DeepSeek Error]", error);
-        if (this.isLimitError(error)) this.openCircuit("deepseek");
+        if (this.isLimitError(error)) this.openCircuit("deepseek", this.getRetryAfterMs(error));
       }
     }
 
@@ -1092,9 +1221,12 @@ class ProviderManager {
       try {
         console.log(`[Hybrid] Trying Gemini`);
         const result = await this.callGemini(systemPrompt, contextForLlm, conversationHistory, userMessage);
-        if (result.content && result.content.trim().length > 20) {
+        if (isValidResponse(result.content)) {
           console.log(`[Hybrid] Gemini response successful`);
           return { content: result.content, provider: "gemini" };
+        }
+        if (result.content && result.content.trim().length > 20) {
+          console.log(`[Hybrid] Gemini response REJECTED (repetition detected)`);
         }
       } catch (error: any) {
         errors.push(`Gemini: ${error.message}`);
@@ -1107,9 +1239,12 @@ class ProviderManager {
       try {
         console.log(`[Hybrid] Trying OpenAI`);
         const result = await this.callOpenAI(systemPrompt, contextForLlm, conversationHistory, userMessage);
-        if (result.content && result.content.trim().length > 20) {
+        if (isValidResponse(result.content)) {
           console.log(`[Hybrid] OpenAI response successful`);
           return { content: result.content, provider: "openai" };
+        }
+        if (result.content && result.content.trim().length > 20) {
+          console.log(`[Hybrid] OpenAI response REJECTED (repetition detected)`);
         }
       } catch (error: any) {
         errors.push(`OpenAI: ${error.message}`);
@@ -1194,7 +1329,11 @@ class ProviderManager {
     messages.push({ role: "user", content: userMessage });
 
     const completion = await this.openRouterClient.chat.completions.create({
-      model: process.env.OPENROUTER_MODEL || "openai/gpt-4o-mini",
+      // STAGE 15 (user fix): default model BEPUL — OpenRouter'da kredit
+      // bo'lmasa ham ishlaydi (pullik gpt-4o-mini 402 kreditsiz xato beradi).
+      // openrouter/free — OpenRouter eng yaxshi bepul modelni avtomatik tanlaydi
+      // (gemma-4-26b:free sifat jihatdan past — placeholder chiqarardi).
+      model: process.env.OPENROUTER_MODEL || "openai/gpt-oss-20b:free",
       messages: messages as any,
       temperature: 0.3,
       max_tokens: 1024,
@@ -1334,6 +1473,10 @@ class ProviderManager {
    *
    * CONFIDENCE SCORE: entityConfidence past bo'lsa aniqlashtiruvchi savol
    * javob oxiriga qo'shiladi.
+   *
+   * STAGE 14g: profile (recommendationProfile) ham o'tkaziladi — general_chat
+   * shabloni vaziyatga mos javob beradi ("imtihondan yiqildim" → xususiy-first
+   * maslahat, generic "Sizni tushunaman" emas).
    */
   private getTemplateResponse(
     intent: string,
@@ -1341,7 +1484,8 @@ class ProviderManager {
     message: string,
     language: string,
     entities?: Record<string, any>,
-    entityConfidence?: Record<string, number>
+    entityConfidence?: Record<string, number>,
+    profile?: Record<string, any> | null
   ): string {
     return responseBuilder.build({
       intent,
@@ -1350,6 +1494,7 @@ class ProviderManager {
       language,
       entities,
       entityConfidence,
+      profile,
     });
   }
 

@@ -37,6 +37,9 @@ UsersatxamOneDriveDesktopmentalba_agentswagger.json
 # local env files
 .env
 .env*.local
+
+# test tokenlar (maxfiy — gitga tushmasligi kerak)
+.test-tokens.json
 # lekin namuna fayl gitga tushishi mumkin (secret yo'q)
 !.env.example
 

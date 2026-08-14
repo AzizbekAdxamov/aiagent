@@ -43,6 +43,8 @@ export interface BuildTemplateParams {
   /** CONFIDENCE SCORE: past ishonchli direction bo'lsa clarification qo'shiladi */
   entityConfidence?: Record<string, number>;
   entities?: Record<string, any>;
+  /** STAGE 14g: recommendationProfile — general_chat shabloni vaziyatga mos javob beradi */
+  profile?: Record<string, any> | null;
 }
 
 export class ResponseBuilder {
@@ -50,7 +52,7 @@ export class ResponseBuilder {
    * Tool natijalari asosida template javob qurish.
    * Greeting so'zi → greeting shabloni, keyin tool bo'yicha dispatch.
    */
-  build({ intent, toolResults, message, language, entityConfidence, entities }: BuildTemplateParams): string {
+  build({ intent, toolResults, message, language, entityConfidence, entities, profile }: BuildTemplateParams): string {
     // Greeting — FAQAT toza salomlashish (classifier Step 0 greeting guard bilan
     // bir xil qoida). MUHIM (Fix): "Salom. Men bu yil imtihondan yiqildim...
     // Qanday maslahat berasan?" kabi UZUN xabar greeting EMAS — unga greeting
@@ -104,7 +106,7 @@ export class ResponseBuilder {
             content = formatComparison(firstResult);
             break;
           case "recommend":
-            content = formatRecommend(firstResult, message);
+            content = formatRecommend(firstResult, message, profile);
             break;
           case "explain_recommendation":
             content = formatExplanation(firstResult);
@@ -117,7 +119,7 @@ export class ResponseBuilder {
 
     // Intent-level fallback (tool natijasi bo'lmagan yoki "none" tool bo'lsa)
     if (content === null) {
-      content = this.intentFallback(intent, message, language);
+      content = this.intentFallback(intent, message, language, profile);
     }
 
     // CONFIDENCE SCORE: past ishonchli direction bo'lsa — aniqlashtirish qo'shamiz
@@ -129,7 +131,7 @@ export class ResponseBuilder {
   }
 
   /** Tool natijasi bo'lmaganda — intent bo'yicha maxsus javob */
-  private intentFallback(intent: string, message: string, language: string): string {
+  private intentFallback(intent: string, message: string, language: string, profile?: Record<string, any> | null): string {
     const lower = message.toLowerCase();
 
     if (intent === "direction_search") return directionNotFoundResponse();
@@ -143,7 +145,7 @@ export class ResponseBuilder {
     if (intent === "university_search" || intent === "university_detail") return universityNotFoundResponse();
     if (intent === "thanks") return thanksResponse();
     if (intent === "admission") return admissionResponse(message);
-    if (intent === "general_chat") return generalChatResponse(language);
+    if (intent === "general_chat") return generalChatResponse(language, profile);
 
     if (lower.includes("qaysi") || lower.includes("tanlasam") || lower.includes("bilmayman") || lower.includes("yaxshisi") || lower.includes("maslahat")) {
       return genericClarificationResponse(language);

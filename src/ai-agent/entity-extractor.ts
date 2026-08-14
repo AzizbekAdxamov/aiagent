@@ -74,8 +74,48 @@ function parseMoney(raw: string): number | null {
  *   "$5000 gacha"           → { tuitionMax: 64000000 }
  */
 export function extractBudget(message: string): BudgetRange {
-  const lower = message.toLowerCase();
+  let lower = message.toLowerCase();
   const result: BudgetRange = {};
+
+  // FALSE POSITIVE GUARD: "oyiga 20 mln topaman" — OYLIK daromad, kontrakt
+  // byudjeti EMAS (yillik kontrakt oylik maoshdan ancha farq qiladi).
+  // "har oy", "oylik", "oyiga" so'zlari bilan kelgan miqdor budget deb
+  // hisoblanmaydi. STAGE 15d (adversarial test — user qoidasi).
+  //
+  // MUHIM (STAGE 15e fix): guard butun xabarni o'chirmasligi kerak —
+  // "20 mln oyiga topaman, universitetga 20 mln ajrataman" kabi gapda
+  // oylik daromad bo'lagi tashlanadi, lekin universitетga ajratilgan
+  // miqdor ("universitetga 20 mln ajrataman") saqlanadi.
+  if (/\b(oyiga|oylik|har\s+oy)\b/i.test(lower)) {
+    const clauses = lower.split(/[.,;!?]/);
+    const kept = clauses.filter((c) => !/\b(oyiga|oylik|har\s+oy)\b/i.test(c)).join(" ").trim();
+    if (!kept) return result;
+    lower = kept;
+  }
+
+  // "20 mln budjetim bor, lekin kerak bo'lsa 25 mln ham beraman" — user
+  // zarurat bo'lsa yuqoriroq miqdorga tayyor. Ikkala miqdor ichida ENGA
+  // YUQORISINI tuitionMax deb olamiz (20 mln emas, 25 mln!).
+  // STAGE 15e (adversarial test — boundary so'zlar: "lekin", "ham").
+  // STAGE 19: "lekin 50 mln bo'lsa ham yaxshi universitet bo'lsa ayt" —
+  // "ham beraman" o'rniga "ham bo'lsa/ko'raman" shakli ham shartli rozilik.
+  const willingPatterns = [
+    /(\d+(?:[.,]\d+)?)\s*(?:mln|million|milyon)\b[^.!?]{0,80}\blekin\b[^.!?]{0,60}\b(\d+(?:[.,]\d+)?)\s*(?:mln|million|milyon)\b[^.!?]{0,35}\bham\s*(?:beraman|to'layman|ajrataman|oshiraman|qo'shaman|chiqaraman|ko'taraman|bersam\s+bo'ladi|bera\s+olaman|berolaman)\b/i,
+    /(\d+(?:[.,]\d+)?)\s*(?:mln|million|milyon)\b[^.!?]{0,80}\blekin\b[^.!?]{0,60}\b(\d+(?:[.,]\d+)?)\s*(?:mln|million|milyon)\b[^.!?]{0,30}\bbo'lsa\s+ham\b/i,
+  ];
+  let willingHigher: RegExpMatchArray | null = null;
+  for (const p of willingPatterns) {
+    const m = lower.match(p);
+    if (m) { willingHigher = m; break; }
+  }
+  if (willingHigher) {
+    const a = parseFloat(willingHigher[1].replace(',', '.')) * 1_000_000;
+    const b = parseFloat(willingHigher[2].replace(',', '.')) * 1_000_000;
+    if (!isNaN(a) && !isNaN(b)) {
+      result.tuitionMax = Math.round(Math.max(a, b));
+      return result;
+    }
+  }
 
   // "X dan Y gacha" — ikki miqdor oralig'i
   // MUHIM: $ belgisi ham capture guruhida bo'lishi kerak, aks holda parseMoney USD'ni ko'rmaydi!
@@ -94,11 +134,72 @@ export function extractBudget(message: string): BudgetRange {
     if (result.tuitionMin || result.tuitionMax) return result;
   }
 
-  // Yuqori chegara: "X gacha", "X dan kam", "X gacha bo'lgan", "X dan oshmagan", "$5000 gacha"
-  const maxMatch = lower.match(/(\$?\s*[\d.,]+\s*(?:mln|million|milyon|mln\.)?)\s*(?:gacha|gachagacha|dan\s+kam|gacha\s+bo'lgan|dan\s+oshmagan|dan\s+past|atrofida)/i);
+  // Yuqori chegara: "X gacha", "X dan kam", "X gacha bo'lgan", "X dan oshmagan",
+  // "$5000 gacha", "20 million so'm atrofida" (so'm oradagi so'z bo'lishi mumkin)
+  // STAGE 15c (adversarial test): kengaytirilgan formatlar ham qo'llab-
+  // quvvatlanadi:
+  //   "15 milliondan oshmasin"   → tuitionMax=15000000 (dan oshmasin!)
+  //   "Eng ko'pi 25 mln"         → tuitionMax=25000000
+  //   "20 mln ichida bo'lsin"    → tuitionMax=20000000
+  //   "30 milliongacha bera olaman" → maxMatch allaqachon ishlagan
+  const maxMatch =
+    lower.match(/(\$?\s*[\d.,]+\s*(?:mln|million|milyon|mln\.)?)\s*(?:so'm\s*)?(?:gacha|gachagacha|dan\s+kam|gacha\s+bo'lgan|dan\s+oshmagan|dan\s+oshmaydigan|dan\s+oshmayman|dan\s+oshirmayman|dan\s+oshmang|dan\s+past|atrofida|ichida)/i)
+    || lower.match(/(?:eng\s+ko'pi|eng\s+ko'p|maksimum|ko'pi\s+bilan)\s*(\$?\s*[\d.,]+\s*(?:mln|million|milyon|mln\.)?)/i)
+    // "15 milliondan oshmasin" — "milliondan" birikmasi (dan suffix birikkan)
+    || lower.match(/(\$?\s*[\d.,]+\s*(?:mln|million|milyon|mln\.)?)\s*dan\s*(?:oshmasin|oshmasin|oshmaydi|oshmay)/i)
+    // "20 gacha" — birliksiz raqam + gacha ("20 gacha" = 20 mln gacha)
+    || lower.match(/(\d+(?:[.,]\d+)?)\s*gacha/i);
   if (maxMatch) {
-    const val = parseMoney(maxMatch[1]);
+    // Birliksiz raqam ("20 gacha") — parseMoney "20" ni mln deb hisoblamaydi,
+    // shuning uchun "20 mln" ko'rinishida yuboramiz.
+    const raw = /(?:mln|million|milyon)/i.test(maxMatch[1]) ? maxMatch[1] : `${maxMatch[1].trim()} mln`;
+    const val = parseMoney(raw);
     if (val) result.tuitionMax = val;
+  }
+
+  // Oraliq: "10-15 mln oralig'ida", "20-25 mln", "15-20 million" — ikki raqam
+  // orasida (tire yoki 'dan'), lekin "dan...gacha" emas. STAGE 15c/d
+  // (adversarial test): "20-25 mln" → min=20m, max=25m (faqat max emas!).
+  const rangeAlt = lower.match(/(\d+(?:[.,]\d+)?)\s*(?:-|–|—)\s*(\d+(?:[.,]\d+)?)\s*(?:mln|million|milyon)\b/i);
+  if (rangeAlt) {
+    const min = parseMoney(`${rangeAlt[1]} mln`);
+    const max = parseMoney(`${rangeAlt[2]} mln`);
+    if (min) result.tuitionMin = min;
+    if (max) result.tuitionMax = max;
+    if (result.tuitionMin || result.tuitionMax) return result;
+  }
+
+  // "15 dan 20 gacha" — birliksiz 'dan...gacha' (mln so'zi yo'q)
+  const rangeBare = lower.match(/(\d+(?:[.,]\d+)?)\s*dan\s*(\d+(?:[.,]\d+)?)\s*gacha/i);
+  if (rangeBare) {
+    const min = parseMoney(`${rangeBare[1]} mln`);
+    const max = parseMoney(`${rangeBare[2]} mln`);
+    if (min) result.tuitionMin = min;
+    if (max) result.tuitionMax = max;
+    if (result.tuitionMin || result.tuitionMax) return result;
+  }
+
+  // Sof "X mln" / "X million" / "Xm" ko'rinishi (hech qanday gacha/dan yuqori
+  // so'zi yo'q) → tuitionMax sifatida: "Budjetim 20 mln", "20 million budjetim
+  // bor", "20m". Oldin faqat extractUserProfile'da fallback bor edi — intent
+  // entities'ga ham tushishi kerak (recommend tool budget'ni shu yerdan oladi).
+  // STAGE 15c/d fix: "20m" qisqartmasi ham qo'llab-quvvatlanadi.
+  if (result.tuitionMax === undefined && result.tuitionMin === undefined) {
+    const approx = lower.match(/(\d+(?:[.,]\d+)?)\s*(?:mln|million|milyon|m)\b/i);
+    if (approx) {
+      const val = parseFloat(approx[1].replace(',', '.'));
+      if (!isNaN(val)) result.tuitionMax = Math.round(val * 1_000_000);
+    }
+  }
+
+  // Sof raqam: "20 000 000", "20000000" (probel bilan ham!) → tuitionMax.
+  // STAGE 15d (adversarial test — user qoidasi: "20 000 000" ham format).
+  if (result.tuitionMax === undefined && result.tuitionMin === undefined) {
+    const digits = lower.replace(/[^\d]/g, "");
+    if (digits.length >= 7) {
+      const val = parseInt(digits, 10);
+      if (!isNaN(val) && val >= 1_000_000) result.tuitionMax = val;
+    }
   }
 
   // Pastki chegara: "X dan yuqori" (raqam OLDIN), "dan yuqori X" (raqam KEYIN), "kamida X"
@@ -304,7 +405,10 @@ export function extractAdmissionFailed(message: string): boolean {
   // updateRecommendationProfile RAW matn bilan, isSituationalRecommendation
   // normalize qilingan matn bilan chaqiradi — natija ikkala yo'lda bir xil.
   const m = String(message).replace(/[’‘`]/g, "'");
-  return /\b(?:imtihon(?:dan)?\s+(?:yiqildim|y?iqilib|o\'ta\s+olmadim|o\'tolmadim)|o\'qishga\s+(?:kira\s+olmadim|kira\s+olmadim|kirmadim|kirmaganman)|qabul(?:dan)?\s+(?:o\'ta\s+olmadim|o\'tolmadim|yutqazdim)|ball(?:im|im)?\s+(?:yetmadi|yetmayapti|yetmaydi)|grant(?:ga)?\s+(?:kira\s+olmadim|ololmadim|yutolmaganman)|kvota(?:ga)?\s+(?:kira\s+olmadim|tushmadim|olmaganman)|o\'qishga\s+olishmadi|qabul\s+qilmadi|kirmadim\s+o\'qishga|(?:universitet|oliygoh)(?:ga|larga)?\s+kira\s+olmadim|kira\s+olmadim|yiqildim)\b/i.test(m);
+  // REVIEWER FIX: bare "olmadim" juda keng ("universitetga javob olmadim"
+  // kabi false positive) — faqat aniq o'qish/qabul iboralari bilan birga qabul
+  // qilinadi. "kirolmadim" / "kira olmadim" alohida alternativ sifatida bor.
+  return /\b(?:imtihon|test|sinov)(?:dan|lar(?:dan)?)?\s+(?:yiqildim|y?iqilib|o'?ta\s+olmadim|o'?tolmadim|o'?tolmaganman|yutqazdim)\b|\bo'qishga\s+(?:kira\s+olmadim|kirmadim|kirmaganman|kirolmadim|kiralolmadim)\b|\b(?:universitet|oliygoh|oqish|o'qish)(?:ga|lar(?:ga)?|larga)?\s+(?:kira\s+olmadim|kirolmadim|kirmadim)\b|\bqabul(?:dan)?\s+(?:o'?ta\s+olmadim|o'?tolmadim|yutqazdim|o'?tmadim)\b|\bball(?:im)?\s+(?:yetmadi|yetmayapti|yetmaydi)\b|\bgrant(?:ga|lar(?:ga)?)?\s+(?:kira\s+olmadim|ololmadim|yutolmaganman|ballim\s+yetmadi)\b|\bkvota(?:ga)?\s+(?:kira\s+olmadim|tushmadim|olmaganman)\b|\bo'qishga\s+olishmadi\b|\bqabul\s+qilmadi\b|\bkirmadim\s+o'qishga\b|\bkira\s+olmadim\b|\bkirolmadim\b|\byiqildim\b/i.test(m);
 }
 
 /**
@@ -332,9 +436,13 @@ export function extractUserGoalFlags(message: string): {
   wantsInternational?: boolean;
 } {
   const lower = message.toLowerCase();
+  // STAGE 18 (blind): "yotoqxona bo'lmasa ham mayli", "yotoqxona shart emas" —
+  // yotoqxona MENTION qilingan, lekin talab EMAS (befarq/rad). Negativ ifoda
+  // yotoqxona so'zidan keyin kelsa → flag qo'yilmaydi.
+  const hostelNegated = /\b(yotoqxona|hostel|turar\s*joy|accommodation|dormitory)\b[^.!?]{0,45}\b(kerak\s+emas|shart\s+emas|bo'lmasa\s+ham\s+mayli|bo'lmasa\s+mayli|bo'lmasa\s+ham\s+bo'ladi|bo'lmasa\s+bo'ldi|xohlamayman|istamayman|keragi\s+yo'q)\b/i.test(lower);
   return {
     wantsGrant: /\b(grant|stipendiya|scholarship|chegirma|bepul|tekin|pulsiz)\b/i.test(lower) || undefined,
-    wantsHostel: /\b(yotoqxona|hostel|turar\s*joy|accommodation|dormitory)\b/i.test(lower) || undefined,
+    wantsHostel: (/\b(yotoqxona|hostel|turar\s*joy|accommodation|dormitory)\b/i.test(lower) && !hostelNegated) || undefined,
     wantsInternational: /\b(xalqaro diplom|xalqaro sertifikat|international degree|double degree|qo'shma diplom|chet elda tan olinadi|xorijda ishlash)\b/i.test(lower) || undefined,
   };
 }
@@ -414,9 +522,11 @@ export function extractUserProfile(message: string): UserProfile {
   if (budget.tuitionMax) profile.budget = budget.tuitionMax;
   else if (budget.tuitionMin) profile.budget = budget.tuitionMin;
 
-  // Sof "X mln" ko'rinishi (gacha/dan yuqori yo'q) → budget sifatida
+  // Sof "X mln" / "X million" / "X milyon" ko'rinishi (gacha/dan yuqori yo'q)
+  // → budget sifatida. "20 million budjetim bor" — "million" so'zi ham
+  // qo'llab-quvvatlanadi (faqat "mln" emas!), aks holda profilga yozilmaydi.
   if (!profile.budget) {
-    const approxMatch = message.match(/(\d+(?:[.,]\d+)?)\s*mln\b/i);
+    const approxMatch = message.match(/(\d+(?:[.,]\d+)?)\s*(?:mln|million|milyon)\b/i);
     if (approxMatch) {
       const val = parseFloat(approxMatch[1].replace(',', '.'));
       if (!isNaN(val)) profile.budget = Math.round(val * 1_000_000);

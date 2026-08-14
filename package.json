@@ -13,7 +13,12 @@
     "db:push": "prisma db push",
     "check:env": "node scripts/check-env.mjs",
     "db:seed": "prisma db seed",
-    "cleanup:guests": "tsx scripts/cleanup-guest-sessions.ts"
+    "cleanup:guests": "tsx scripts/cleanup-guest-sessions.ts",
+    "stress": "tsx scripts/run-stress-tests.ts",
+    "stress:block4": "tsx scripts/run-stress-tests.ts --block 4",
+    "test:regression": "tsx scripts/regression-intents.ts",
+    "test:quality": "tsx scripts/regression-quality.ts",
+    "test:all": "tsx scripts/regression-intents.ts && tsx scripts/regression-quality.ts"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"

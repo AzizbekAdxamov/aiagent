@@ -82,14 +82,14 @@ export class IntentClassifier {
     // qil(?:ing)? va ber(?:ing)? alohida qo'yildi.
     // REVIEWER FIX: qiling|bering qil(?:ing)?|ber(?:ing)? tarkibida allaqachon
     // bor — redundant alternativlar olib tashlandi.
-    const STRONG_REC_SIGNALS = /\b(qaysi\s+(?:universitet(?:ni)?|yo'nalish(?:ni)?|oliygohni)\s+tanla|qaysi\s+biri\s+menga\s+(?:mos|yaxshiro?q|afzal)|tavsiya\s+(?:qil(?:ing)?|ber(?:ing)?)\b|tavsiya\s+(?:qil|ber)(?!gan|ingan|dilar|dik|di\b|ding|dingiz|gansiz|ganman|ganlar)\w*|eng\s+mos(?:ini)?|5\s+ta\s+variant|ustunlik(?:lari)?\s*(?:va|,)\s*kamchilik(?:lari)?|maslahat(?:ingiz)?\s+(?:bera|ber)|qaysi\s+(?:yo'nalish|kasb|soha)\s+(?:tanlasam|mos|kerak)|nima\s+tanlasam)\b/i;
+    const STRONG_REC_SIGNALS = /\b(qaysi\s+(?:universitet(?:ni)?|yo'nalish(?:ni)?|oliygohni)\s+tanla|qaysi\s+biri\s+menga\s+(?:mos|yaxshiro?q|afzal)|tavsiya\s+(?:qil(?:ing)?|ber(?:ing)?)\b|tavsiya\s+(?:qil|ber)(?!gan|ingan|dilar|dik|di\b|ding|dingiz|gansiz|ganman|ganlar)\w*|eng\s+mos(?:ini)?|5\s+ta\s+variant|ustunlik(?:lari)?\s*(?:va|,)\s*kamchilik(?:lari)?|universitet(?:lar|lari|larni|laridan|lariga|im|imni|ing|ingni)?\s+maslahat\s+(?:ber(?:ing)?|berasan|berasiz|berasizmi|berasanmi)|qaysi\s+(?:yo'nalish|kasb|soha)\s+(?:tanlasam|mos|kerak)|nima\s+tanlasam|\b(?:shunga|unga|o'shanga|shunday|xuddi\s+shunday)\s+o'xshash\b|\bunga\s+o'xshab\b|qaysi\s+biri(?:ni)?\s+(?:olsam|tanlasam|kirsam|topshirsam)|\bo'xshash\b[^.!?]{0,20}\b(?:kerak|univ\w*|universitet\w*)\b|qaysi\s+univ\w*\s+[^.!?]{0,25}?\b(?:menga\s+ko'proq\s+mos|mos\s+keladigan)\b)\b/i;
     // Direction + maslahat so'rovi birga kelsa → recommendation. "Huquq
     // yo'nalishida o'qimoqchiman, qaysi universitet yaxshi" — yo'nalish
     // aniqlangan va user maslahat so'rayapti → recommendation. Lekin yalang'och
     // "qaysi universitet yaxshiroq" (direction YO'Q) comparison bo'lib qoladi.
     const hasDirAdviceSignal =
       !!detectedDirection &&
-      /\bqaysi\s+[^,.;]{0,40}?(?:universitet|oliygoh)[^,.;]{0,30}?(?:o'qishim|o'qisam|o'qishni|topshirsam|kirsam|yaxshi|yaxshiroq|mos|afzal)\b/i.test(cleanMessage);
+      /\bqaysi\s+[^,.;]{0,40}?(?:universitet|oliygoh|univ\w*)[^,.;]{0,30}?(?:o'qishim|o'qisam|o'qishni|topshirsam|kirsam|yaxshi|yaxshiroq|mos|afzal)\b/i.test(cleanMessage);
     const hasStrongRecSignal = STRONG_REC_SIGNALS.test(cleanMessage) || hasDirAdviceSignal;
 
     // Step 1: Check each intent pattern (tartib config'dan — intent-config.json)
@@ -117,6 +117,81 @@ export class IntentClassifier {
     // qiymatini tekshiradi (closure orqali).
     const isUnknownIntent = () =>
       !matchedIntent || matchedIntent === "faq" || matchedIntent === "unknown";
+
+    // ===== GRANT REVERSAL (STAGE 19, adversarial) =====
+    // "Grant kerak emas... aslida grant bo'lsa yaxshi" — user FIKRINI O'ZGARTIRDI:
+    // negativ "kerak emas" dan keyin ijobiy "aslida ... bo'lsa yaxshi" kelgan.
+    // Oxirgi istak ustun → recommendation (grant preference), negativ blok
+    // ishlamasligi uchun OLDINDAN qaytamiz.
+    if (matchedIntent === "grant_search" && /\bgrant\w*\b[^!?]{0,30}\b(kerak\s+emas|shart\s+emas|istamayman|xohlamayman)\b[^!?]{0,50}\b(aslida|endi|lekin)\b[^!?]{0,50}\b(bo'lsa\s+yaxshi|kerak|xohlayman|istayman|bo'lsa\s+ham\s+bo'ladi)\b/i.test(cleanMessage)) {
+      matchedIntent = "recommendation";
+      matchedConfidence = 0.85;
+      console.log(`[GrantReversal] → recommendation (fikr o'zgarishi): "${cleanMessage.substring(0, 60)}"`);
+    }
+
+    // ===== GRANT NEGATIV ISTAK (STAGE 15e) =====
+    // "grant shart emas", "grant kerak emas", "grant istamayman" — grant
+    // QIDIRUVI emas, rad etilgan imtiyoz. "grant" so'zi grant_search
+    // pattern'iga tushib qoladi. Qiziqish/university bor bo'lsa → recommendation
+    // (preference), aks holda faq (suhbat — nima kerakligini so'raydi).
+    if (matchedIntent === "grant_search" && /\bgrant\w*\b[^.!?]{0,40}\b(shart\s+emas|kerak\s+emas|istamayman|xohlamayman|bo'lmasin|keragi\s+yo'q|umid\s+qilmayman|umid\s+yo'q|kutmayman|kutolmayman)\b/i.test(cleanMessage)) {
+      // STAGE 18 (blind): "grantga umid qilmayman, o'zim to'layman" — grant rad
+      // etilgan, lekin TO'LOV/KONTRAKT konteksti bor → recommendation (o'z
+      // mablag'i bilan o'qish imkoniyatlari). Sof "grant shart emas" (bo'sh) → faq.
+      const hasPaymentContext = /\b(to'layman|to'lay|to'laman|kontrakt|budjet|byudjet|pul)\b/i.test(cleanMessage);
+      matchedIntent = detectedDirection || entities.university || hasPaymentContext ? "recommendation" : "faq";
+      matchedConfidence = 0.7;
+      console.log(`[GrantNegation] grant istagi rad etildi → ${matchedIntent}: "${cleanMessage.substring(0, 60)}"`);
+    }
+
+    // ===== GRANT SHARTLI ROZI (STAGE 18, blind) =====
+    // "grant bo'lmasa, kontraktga rozi" — grant QIDIRUVI emas, shartli tanlov
+    // bayoni (grant afzal, bo'lmasa kontrakt). "bo'lmasa" + qabul so'zi
+    // (rozi/mayli/bo'ladi) → recommendation (preference).
+    if (matchedIntent === "grant_search" && /\bgrant\w*\b[^.!?]{0,30}\bbo'lmasa\b[^.!?]{0,30}\b(rozi|mayli|bo'ladi|ham\s+bo'ladi|bo'lar\s+edi)\b/i.test(cleanMessage)) {
+      matchedIntent = "recommendation";
+      matchedConfidence = 0.85;
+      console.log(`[GrantConditional] → recommendation (shartli rozi): "${cleanMessage.substring(0, 60)}"`);
+    }
+
+    // ===== GRANT PREFERENCE (STAGE 17, blind) =====
+    // "20 mln bor, lekin grant chiqsa undan ham yaxshi" — grant QIDIRUVI emas,
+    // shartli afzallik bayoni (budget + soft grant) → recommendation.
+    if (matchedIntent === "grant_search" && /\bgrant\w*\b[^.!?]{0,40}\b(chiqsa|bo'lsa|olsam|yutsam|tushsa|berilsa)\b[^.!?]{0,30}\b(yaxshi|zo'r|afzal|yaxshiroq|bo'ladi|ham\s+bo'ladi)\b/i.test(cleanMessage)) {
+      matchedIntent = "recommendation";
+      matchedConfidence = 0.85;
+      console.log(`[GrantPreference] → recommendation (shartli grant afzalligi): "${cleanMessage.substring(0, 60)}"`);
+    }
+
+    // ===== KONTRAKT PREFERENCE (STAGE 15e) =====
+    // "Grant kerak, kontrakt ham bo'lishi mumkin" — kontrakt NARX so'rovi EMAS
+    // (qancha/necha/bormi/narxi yo'q), grant afzalligi + kontrakt imkoniyati
+    // bayoni. Yalang'och "kontrakt" so'zi tuition_search pattern'iga tushib
+    // qoladi → recommendation ga o'tkazamiz (preference bayoni).
+    if (matchedIntent === "tuition_search" &&
+        /\bgrant\w*\b[^.!?]{0,40}\b(kerak|bo'lsa\s+yaxshi|istayman|xohlayman)\b/i.test(cleanMessage) &&
+        !/\b(qancha|necha|bormi|narx|narhi|narxi|to'lovi|arzon)\b/i.test(cleanMessage)) {
+      matchedIntent = "recommendation";
+      matchedConfidence = 0.85;
+      console.log(`[TuitionPreference] → recommendation (grant + kontrakt imkoniyati): "${cleanMessage.substring(0, 60)}"`);
+    }
+
+    // ===== TUITION VAZIYAT/ISTAK (STAGE 17, blind) =====
+    // "bizda pul yo'q, davlat universiteti bo'lsa yaxshi edi" (byudjet cheklovi +
+    // istak), "grant ololmadim, endi kontrakt to'lay olamanmi" (vaziyat) —
+    // katalog EMAS, user maslahat kutyapti → recommendation. Sof NARX so'rovi
+    // ("kontrakti qancha?") tuition_search qoladi.
+    if (matchedIntent === "tuition_search" && !/\b(qancha|necha|bormi|ro'yxati)\b/i.test(cleanMessage)) {
+      const hasWishSignal = /\b(bo'lsa\s+yaxshi\s+(?:edi|bo'lardi)?|bo'lsa\s+bo'ldi|qani\s+edi|kerak\s+edi|xohlashyapti|xohlashadi|xohlaymiz)\b/i.test(cleanMessage);
+      const hasSituationSignal = /\b(ololmadim|olmadim|olmadi|yetmadi|yetmayapman|kirmadim|kirolmadim|o'tolmadim|tusholmadim|ballim\s+yetmadi)\b/i.test(cleanMessage);
+      // STAGE 18 (blind): "narxi muhim emas" — narx so'rovi EMAS, afzallik bayoni
+      const hasPriceIndifference = /\b(narx\w*|pul\w*|to'lov\w*)\b[^.!?]{0,30}\b(muhim\s+emas|ahamiyati\s+yo'q|shart\s+emas)\b/i.test(cleanMessage);
+      if (hasWishSignal || hasSituationSignal || hasPriceIndifference) {
+        matchedIntent = "recommendation";
+        matchedConfidence = 0.85;
+        console.log(`[TuitionSituation] → recommendation (istik/vaziyat): "${cleanMessage.substring(0, 60)}"`);
+      }
+    }
 
     // Step 2a0: MASLAHAT OVERRIDE — user O'ZI nima qilishini bilmay, maslahat so'rayapti.
     // MUHIM (Fix): "Men tarix faniga qiziqaman lekin qanday universitetda o'qishni
@@ -176,7 +251,7 @@ export class IntentClassifier {
     //  a) ANIQ tanlov so'zi: "tanlasam", "tanlamoqchiman" — o'zi maslahat ekanini bildiradi
     //     ("Qaysi universitetni tanlasam bo'ladi?" → qiziqish shartsiz recommendation)
     //  b) Qiziqish + bilmaslik: "X ga qiziqaman, qanday o'qishni bilmayman" → recommendation
-    const hasExplicitChoiceWord = /\b(tanlasam|tanlashim|tanlamoqchiman|tanlashni|tanlashga|tanlov|topishim|toplamoqchiman)\b/i.test(cleanMessage);
+    const hasExplicitChoiceWord = /\b(tanlasam|tanlashim|tanlamoqchiman|tanlashni|tanlashga|tanlov|topishim|toplamoqchiman|topshiramiz|topshirishimiz|tanlaymiz|tanlashimiz)\b/i.test(cleanMessage);
     const hasInterestWithConfusion =
       hasInterestPhrase(cleanMessage) &&
       (/\b(bilmayman|bilmay|bilamanmi|tushunmayapman)\b/i.test(cleanMessage) ||
@@ -197,10 +272,27 @@ export class IntentClassifier {
     const hasContrast = /\blekin\b/i.test(cleanMessage);
     const hasLangLevel = /\b(IELTS|TOEFL|SAT|C1|C2|B2|B1)\b/i.test(cleanMessage);
     const profileSignalCount = [hasWeaknessSignal, hasContrast, hasLangLevel].filter(Boolean).length;
-    const hasProfileContext = profileSignalCount >= 2;
+    // STAGE 17 (blind): qiziqish + qarama-qarshilik ("IT yoqadi, lekin ota-onam
+    // iqtisod o'qishingni xohlashyapti") — haqiqiy TANLOV ZIDDIYATI →
+    // recommendation (maslahat). Qiziqish so'zi talab qilinadi — oddiy
+    // katalog so'rovlari bu orqali recommendation'ga aylanib ketmaydi.
+    const hasProfileContext = profileSignalCount >= 2 || (hasContrast && hasInterestPhrase(cleanMessage));
     const hasOwnDirectionNow = !!detectedDirection;
     const isProfileRecommendation = hasOwnDirectionNow && hasProfileContext;
-    const isAdviceRequest = hasExplicitChoiceWord || hasInterestWithConfusion || isProfileRecommendation;
+    // STAGE 17 (blind): "faqat tibbiyot qiziqtiradi", "ITdan boshqa o'qigim
+    // kelmaydi" — katalog so'rovi emas, ANIQ afzallik bayoni (direction bor) →
+    // recommendation (user o'z tanlovini aniqlab, variantlar kutyapti).
+    const hasExclusivePreference =
+      (hasOwnDirectionNow &&
+        (/\b(faqat)\b[^.!?]{0,30}\b(qiziqtiradi|qiziqaman|kerak|o'qimoqchiman|qarayman|ko'raman)\b/i.test(cleanMessage) ||
+         /\b(\w+)dan\s+boshqa\b[^.!?]{0,40}\b(kelmaydi|yo'q\b|emas\b|o'qimayman|xohlamayman)\b/i.test(cleanMessage)));
+    // STAGE 17 (blind): KATEGORIYA BEFARQLIGI — "Xususiy ham davlat ham farqi
+    // yo'q", "davlat yoki xususiy muhim emas" — user kategoriyaga befarq,
+    // universitet tanlovi kontekstida gapiryapti → recommendation (maslahat).
+    const hasCategoryIndifference =
+      /\b(?:xususiy|davlat|xalqaro|nodavlat|private|state)\b[^.!?]{0,30}\b(farqi\s+yo'q|muhim\s+emas|ahamiyati\s+yo'q)\b/i.test(cleanMessage) ||
+      /\b(farqi\s+yo'q|muhim\s+emas)\b[^.!?]{0,30}\b(?:xususiy|davlat|xalqaro)\b/i.test(cleanMessage);
+    const isAdviceRequest = hasExplicitChoiceWord || hasInterestWithConfusion || isProfileRecommendation || hasExclusivePreference || hasCategoryIndifference;
     if (isAdviceRequest &&
         (matchedIntent === "university_search" || matchedIntent === "university_detail" ||
          matchedIntent === "direction_search" || matchedIntent === "faq" || matchedIntent === null)) {
@@ -238,6 +330,54 @@ export class IntentClassifier {
         matchedConfidence = 0.85;
         console.log(`[Override] university_search → direction_search (message has direction keywords): "${cleanMessage.substring(0, 80)}..."`);
       }
+    }
+
+    // ===== STAGE 18 (blind) QO'SHIMCHA GUARDS =====
+
+    // DELEGATSIYA: "bilmayman, o'zingiz hal qiling" — user qarorni AGENTGA
+    // topshirmoqda, tavsiya so'ramayapti. Config'dagi "bilmayman" pattern'iga
+    // tushib recommendation bo'lib qoladi → faq (aniqlashtiruvchi suhbat).
+    if (matchedIntent === "recommendation" && /\b(o'zingiz|o'zing)\s+(hal\s+qiling|qiling|bilasiz|qaror\s+qiling)\b/i.test(cleanMessage)) {
+      matchedIntent = "faq";
+      matchedConfidence = 0.7;
+      console.log(`[DelegationGuard] → faq (qaror agentga topshirildi): "${cleanMessage.substring(0, 60)}"`);
+    }
+
+    // ADMISSION NEGATIV: "bu yil kirishni xohlamayman, keyingi yil" — kirish
+    // QIDIRUVI emas, kechiktirish bayoni → general_chat (suhbat).
+    if (matchedIntent === "admission" && /\b(kirish|o'qish)\w*\s+(xohlamayman|istamayman|bo'lmasin)\b/i.test(cleanMessage)) {
+      matchedIntent = "general_chat";
+      matchedConfidence = 0.75;
+      console.log(`[AdmissionNegation] → general_chat (kechiktirish): "${cleanMessage.substring(0, 60)}"`);
+    }
+
+    // NEWS + UNIVERSITET FIKRI: "yangi ochilgan universitetga ishonmayman" —
+    // yangiliklar so'rovi EMAS, user universitеt haqida FIKR bildirmoqda → faq.
+    if (matchedIntent === "news_search" && /\b(universitet|oliygoh|institut)\w*\b/i.test(cleanMessage) &&
+        /\b(ishonmayman|ishonmay|ishonmagan|xohlamayman|kerak\s+emas|bo'lmasin|istamayman|qo'rqaman)\b/i.test(cleanMessage)) {
+      matchedIntent = "faq";
+      matchedConfidence = 0.7;
+      console.log(`[NewsOpinionGuard] → faq (universitеt haqida fikr): "${cleanMessage.substring(0, 60)}"`);
+    }
+
+    // FIELD QUERY (sayt/manzil/link/telefon): "PDP sayti bormi", "TATU manzili
+    // qayerda" — to'liq karta EMAS, bitta field so'rovi. Universitet BOR bo'lsa
+    // → university_search (field filter); universitetsiz (kontekstsiz) → faq
+    // (aniqlashtirish — keyingi follow-up konteksti bog'laydi).
+    // "TATU haqida batafsil ayt" (batafsil so'zi) university_detail qoladi.
+    if (matchedIntent === "university_detail" && /\b(sayt|websayt|web\s*sayt|link|manzil|address|telefon|raqam|kontakt)\w*\b/i.test(cleanMessage) &&
+        /\b(bormi|qancha|nima|qayerda|qaerda|necha|qanday|ayt)\b/i.test(cleanMessage)) {
+      matchedIntent = entities.university ? "university_search" : "faq";
+      matchedConfidence = 0.8;
+      console.log(`[FieldQuery] university_detail → ${matchedIntent} (field): "${cleanMessage.substring(0, 60)}"`);
+    }
+
+    // ARZON YO'NALISH: "eng arzon IT univlari" — yo'nalish qidiruvi EMAS,
+    // narx bo'yicha saralash → tuition_search (arzonlik ustun).
+    if (matchedIntent === "direction_search" && /\b(eng\s+arzon|arzonroq|arzoni|arzonlari)\b/i.test(cleanMessage)) {
+      matchedIntent = "tuition_search";
+      matchedConfidence = 0.82;
+      console.log(`[ArzonOverride] direction_search → tuition_search (arzon): "${cleanMessage.substring(0, 60)}"`);
     }
 
     // Step 2b: Override — grant + universitet = university_search
@@ -363,6 +503,13 @@ export class IntentClassifier {
           matchedConfidence = 0.75;
           console.log(`[RuleFallback] → university_search (bare follow-up attribute): "${cleanMessage.substring(0, 80)}"`);
         }
+      } else if (entities.language && /\b(shart\s+emas|muhim\s+emas|ham\s+bo'ladi|bo'ladi\b|yetarli|tilida)\b/i.test(cleanMessage)) {
+        // STAGE 18 (blind): "qoraqalpoq tilida o'qiydigan bormi", "ingliz tili
+        // shart emas, rus tilida ham bo'ladi" — til filtri/afzalligi (so'z soni
+        // cheklovidan tashqari) → university_search.
+        matchedIntent = "university_search";
+        matchedConfidence = 0.75;
+        console.log(`[RuleFallback] → university_search (language preference): "${cleanMessage.substring(0, 80)}"`);
       }
     }
 
@@ -381,7 +528,11 @@ export class IntentClassifier {
       // MUHIM (prod fix): language ham bu yerga kiradi — "Ingliz tilidagilari",
       // "ruschasidagilari" kabi bare language follow-up'lar degree/educationType
       // kabi university filter — direction_search EMAS!
-      const hasDegreeOrET = entities.degree || entities.educationType || entities.language;
+      // STAGE 18 (blind): ta'lim shakli so'zi negativ bo'lsa ham ("kunduzgi
+      // bo'lmasin") entity o'chirilgan bo'ladi — lekin shakl mention'i O'ZI
+      // university filter (katalog) → university_search.
+      const hasDegreeOrET = entities.degree || entities.educationType || entities.language ||
+        /\b(kunduzgi|sirtqi|kechki|masofaviy)\w*\b/i.test(cleanMessage);
       // Aniq yo'nalish sinonimi yoki yo'nalish/dastur kalit so'zi bo'lsa → direction_search qoladi
       // MUHIM: egalik/ko'plik shakllari ham! "yo'nalishlari", "dasturlari", "kurslari"
       // kabi so'zlar ham direction_search ni anglatadi ("bakalavr yo'nalishlari").
@@ -436,8 +587,14 @@ export class IntentClassifier {
       matchedIntent === "transfer" ||
       matchedIntent === "faq" ||
       matchedIntent === "unknown";
+    // MUHIM (Stage 15 fix): STRONG_REC_SIGNALS match bo'lsa GeneralChat override
+    // ishlamaydi — "Qanday universitetlarni maslahat berasan?" kabi ANIQ tavsiya
+    // so'rovini ruhiy chatga yutib yubormaslik kerak. "maslahat" so'zi negative
+    // signal (ruhiy yordam) bo'lishi mumkin, lekin "maslahat berasan/berasiz"
+    // kabi tavsiya so'rovi bilan kelganda — recommendation ustun.
     const isGeneralChat =
       isConversationalTarget &&
+      !hasStrongRecSignal &&
       GENERAL_CHAT_NEGATIVE.test(cleanMessage) &&
       !EXPLICIT_REC_TRIGGER.test(cleanMessage) &&
       !detectedDirection &&
@@ -533,7 +690,11 @@ export class IntentClassifier {
     // Extract university names (known abbreviations and full names)
     // MUHIM: TKXU, TKTU, SamDU kabi qisqartmalar ham bor
     const uniPatterns = [
-      /\b(PDP|INHA|WIUT|TATU|TUIT|SamDU|ADU|MIS|MESI|TKXU|TKTU|TDTU|TDIU|TDYU|TTA|TTPI|TATI|SamSI|BuxDU|FarDU|NamDU|UrDU|QarDU|AndDU|TerDU|NavDPI|JDPU|TDPU|ToshDTU|ToshKEU|TMI|TQI|ToshFA|ToshSEI|amity|westminster|inh[oa]|akfa\s*med(?:line)?)\b/i,
+      // Qisqartma + EGALIK/YO'NALISH qo'shimchalari: "PDPda", "EMUni",
+      // "TATUning", "PDPga" — real foydalanuvchi suffix'li yozadi. \b faqat
+      // so'z chegarasini tekshiradi, suffix esa qo'shimcha guruhda — match[1]
+      // har doim sof qisqartma bo'lib qoladi ("PDPda" → match[1]="PDP").
+      /\b(PDP|INHA|WIUT|TATU|TUIT|EMU|SamDU|ADU|MIS|MESI|TKXU|TKTU|TDTU|TDIU|TDYU|TTA|TTPI|TATI|SamSI|BuxDU|FarDU|NamDU|UrDU|QarDU|AndDU|TerDU|NavDPI|JDPU|TDPU|ToshDTU|ToshKEU|TMI|TQI|ToshFA|ToshSEI|TAFU|amity|westminster|inh[oa]|akfa\s*med(?:line)?)(?:ni|ning|ga|da|dan|dagi|sini|sining|dagi|lar|larining|larida|laridan|lariga)?\b/i,
     ];
 
     for (const pattern of uniPatterns) {
@@ -554,7 +715,7 @@ export class IntentClassifier {
 
         // Demonstrativ/umumiy so'zlar bilan boshlansa — university emas
         // ("shu universitet", "bu institut", "qaysi universitet" kabi follow-up'larda)
-        const genericPrefix = /^(shu|bu|o'sha|qaysi|qanday|bitta|bir|mana|eng|boshqa|barcha|hamma|ko'p|yaxshi|arzon|davlat|xususiy|xalqaro|mahalliy|xorijiy|yangi|men|menga|meni|biz|bizga|ular)\b/i;
+        const genericPrefix = /^(shu|bu|o'sha|qaysi|qanday|bitta|bir|mana|eng|boshqa|barcha|hamma|ko'p|yaxshi|arzon|davlat|xususiy|xalqaro|mahalliy|xorijiy|yangi|men|menga|meni|biz|bizga|ular|katta|kichik|kichikroq|eski|yangi)\b/i;
         // MUHIM (Fix): candidate ICHIDA aniqlash/so'roq so'zlari bo'lsa ham university EMAS!
         // "men tarix faniga qiziqaman lekin qanday universitet" — "qanday" o'rtada,
         // genericPrefix faqat BOSHIni tekshirgani uchun noto'g'ri university bo'lib qolardi.
@@ -586,9 +747,32 @@ export class IntentClassifier {
         // (men/yiqildim/lekin) va tinish belgisi orqali chiqarib tashlanadi.
         const looksLikeRealName =
           !NOT_NAME_WORDS.test(candidate) && !hasSentencePunct && wordCount <= 10;
-        if (!genericCategory.test(candidate) && !genericPrefix.test(candidate) && !hasQuestionWordInside && looksLikeRealName) {
+        // STAGE 15f: "Toshkentda universitet", "Samarqanddagi institut" —
+        // joy nomi + yalang'och universitеt so'zi NOM emas, LOKATSIYA filtri!
+        // ("Toshkent axborot texnologiyalari universiteti" kabi REAL nomlarga
+        // tegmaydi — ularda joy nomi orasida deskriptor bor).
+        const locationOnly = /^(?:toshkent|samarqand|buxoro|andijon|namangan|farg'ona|fargana|qashqadaryo|qashqadarya|surxondaryo|surxondarya|xorazm|navoiy|jizzax|sirdaryo|qoraqalpog'iston|karakalpakstan)(?:da|dagi|dagi|ning|dagi|da)?\s+(?:universitet|oliygoh|institut|akademiya)$/i.test(candidate);
+        if (!genericCategory.test(candidate) && !genericPrefix.test(candidate) && !hasQuestionWordInside && !locationOnly && looksLikeRealName) {
           entities.university = candidate;
         }
+      }
+    }
+
+    // NEGATIV REFERENCE (STAGE 15e): "yo'q TATU emas", "TATU kerak emas",
+    // "TATUni istamayman" — user universitеtni RAD etmoqda, entity saqlanmasligi
+    // kerak (aks holda "yo'q TATU emas" TATU haqida qidiruvga aylanib qolardi).
+    // Muhim: negativ fe'l universitеt nomidan KEYIN DARXOL kelishi shart
+    // (orada boshqa so'z bo'lmasa) — "Yo'q, EMUni aytgandim" (repair) yoki
+    // "PDPda xususiy emas" kabi holatlarga tegmaydi.
+    if (entities.university) {
+      const uniEsc = entities.university.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const uniNegReject = new RegExp(
+        `\\b(?:${uniEsc})(?:ning|ni|ga|da|dan|dagi|sini|sining|lar|larining|larida|laridan|lariga|ning|ni)?\\s+(?:emas|kerak\\s+emas|keragi\\s+yo'q|istamayman|xohlamayman|bo'lsin\\s+emas)\\b`,
+        "i"
+      );
+      if (uniNegReject.test(message)) {
+        delete entities.university;
+        console.log(`[UniNegation] universitеt rad etildi — entity o'chirildi: "${message.substring(0, 60)}"`);
       }
     }
 
@@ -634,7 +818,40 @@ export class IntentClassifier {
 
     // Extract direction category mentions — sinonimlar modulidan foydalanamiz
     // (meditsina, vrach, shifokor, farmatsiya, davolash... barchasi shu yerda)
-    const detectedDirection = detectDirectionCategory(message);
+    // STAGE 17 (blind): yalang'och "ta'lim"/"maktab" pedagogika EMAS.
+    // "bolam maktabni bitiradi" (maktabni TUGATISH), "kechki ta'lim" (ta'lim
+    // SHAKLI) — pedagogika yo'nalishi emas. O'qituvchilik konteksti
+    // ("o'qituvchi bo'lmoqchiman") yoki aniq pedagogika yo'nalishlari
+    // ("maktabgacha ta'lim", "boshlang'ich ta'lim") saqlanadi.
+    let detectedDirection = detectDirectionCategory(message);
+    if (detectedDirection === "pedagogika") {
+      const teacherContext = /\b(o'qituvchi|ustoz|pedagog|teacher|o'qitmoqchi|o'qitaman|o'qitish|dars\s+ber|maktabda\s+ishla|tarbiyachi|psixolog)\b/i.test(message);
+      const compoundPedDir = /\b(maktabgacha|boshlang'ich\s+ta'lim|jismoniy\s+ta'lim|kasb\s+ta'limi?|maxsus\s+pedagogika|defektologiya|inkluziv|maktab\s+o'qituvchisi)\b/i.test(message);
+      const bareEducationWord = !teacherContext && !compoundPedDir && /\b(?:ta'lim|talim|maktab)(?:da|dan|ning|ni|ga|i|ida|idagi|imiz|imizning)?\b/i.test(message);
+      // STAGE 18 (blind): "ustozlari qanday/kim" — professorlar haqida SAVOL,
+      // pedagogika yo'nalishi EMAS ("ustoz" sinonim bo'lsa ham).
+      const facultyQuery = /\bustozlar(?:i|imiz)?\s+(qanday|kim|kimlar|bormi|soni)\b/i.test(message);
+      if (bareEducationWord || facultyQuery) {
+        detectedDirection = null;
+        console.log(`[PedagFalsePositive] pedagogika konteksti yo'q → o'chirildi: "${message.substring(0, 60)}"`);
+      }
+    }
+    // STAGE 18 (blind): "qishloqdan kelaman/qishloqda yashayman" — JOY kelib
+    // chiqishi, qishloq xo'jaligi (agrar) yo'nalishi EMAS.
+    if (detectedDirection === "qishloq") {
+      const originContext = /\b(qishloqdan\s+(?:kelaman|man|keldim|bo'laman)|qishloqda\s+(?:yashayman|yashaymiz)|qishloqdanmiz|qishloq\s+joyida)\b/i.test(message);
+      const agriContext = /\b(qishloq\s+xo'jaligi?|qishloq\s+xojaligi?|agrar|dehqonchilik|fermer)\b/i.test(message);
+      if (originContext && !agriContext) {
+        detectedDirection = null;
+        console.log(`[QishloqFalsePositive] joy kelib chiqishi → agrar yo'nalish o'chirildi: "${message.substring(0, 60)}"`);
+      }
+    }
+    // STAGE 18 (blind): "ingliz tili shart emas, rus tilida ham bo'ladi" — til
+    // AFZALLIGI, filologiya yo'nalishi EMAS (filologiya sinonimlari orqali keladi).
+    if (detectedDirection === "filologiya" && entities.language && !/\b(chet\s+tili|filolog|tilshunos|o'rganmoqchiman)\b/i.test(message)) {
+      detectedDirection = null;
+      console.log(`[LangFalsePositive] til afzalligi → filologiya o'chirildi: "${message.substring(0, 60)}"`);
+    }
     if (detectedDirection) {
       entities.direction = detectedDirection;
     }
@@ -650,12 +867,20 @@ export class IntentClassifier {
     if (/o'zbek(?:cha|chasiga|chasida|chasini|da|dan|ga|ning|ni|lar|lari|larining)?/i.test(message) || /\buzbek\b/i.test(message)) {
       entities.language = "uzbek";
     }
+    // STAGE 18 (blind): "qoraqalpoq tilida o'qiydigan bormi" — til filtri
+    if (/\bqoraqalpoq(?:cha|chasiga|chasida|chasini|da|dan|ga|ning|ni|lar|lari|larining|\s+tili|\s+tilida)?\b/i.test(message) || /\bkarakalpak\b/i.test(message)) {
+      entities.language = "qoraqalpoq";
+    }
 
     // Extract education type — MUHIM (BOSQICH 3): egalik/ko'plik shakllari ham!
     // "kunduzgilari", "sirtqilari", "masofaviylari" kabi follow-up so'zlar ham.
-    if (/\bkunduzgi(?:lar|lari|ning|ni|ga|da|dan|larining)?\b/i.test(message)) entities.educationType = "full-time";
-    if (/\bsirtqi(?:lar|lari|ning|ni|ga|da|dan|larining)?\b/i.test(message)) entities.educationType = "part-time";
-    if (/\bmasofaviy(?:lar|lari|ning|ni|ga|da|dan|larining)?\b/i.test(message)) entities.educationType = "distance";
+    // STAGE 18 (blind): "masofaviy o'qishni xohlamayman" — ta'lim shakli MENTION
+    // qilingan, lekin rad etilgan → o'sha shakl qo'yilmaydi. Negativ FAQAT o'z
+    // shakliga tegadi: "kunduzgi bo'lmasin, sirtqi qilaman" → part-time saqlanadi.
+    const neg = (word: string) => new RegExp(`\\b${word}\\w*\\b[^.!?]{0,40}\\b(xohlamayman|istamayman|bo'lmasin|kerak\\s+emas|shart\\s+emas|keragi\\s+yo'q)\\b`, "i");
+    if (/\bkunduzgi(?:lar|lari|ning|ni|ga|da|dan|larining)?\b/i.test(message) && !neg("kunduzgi").test(message)) entities.educationType = "full-time";
+    if (/\bsirtqi(?:lar|lari|ning|ni|ga|da|dan|larining)?\b/i.test(message) && !neg("sirtqi").test(message)) entities.educationType = "part-time";
+    if (/\bmasofaviy(?:lar|lari|ning|ni|ga|da|dan|larining)?\b/i.test(message) && !neg("masofaviy").test(message)) entities.educationType = "distance";
 
     // Extract institution category (3=davlat, 4=xususiy, 5=xalqaro)
     // MUHIM (BOSQICH 3): egalik/ko'plik shakllari ham! "davlatlari", "xususiylari",
@@ -668,13 +893,69 @@ export class IntentClassifier {
     // yuklamasi ham bor — "davlatmi", "xususiymi", "xalqaromi". Ilgari "mi"
     // ro'yxatda yo'q edi, shuning uchun "davlat" aniqlanmay, faqat "xususiy"
     // chiqardi. Endi ikkalasi ham topiladi → institutionCategories: ["3","4"].
-    if (/\b(?:davlat|public|state)(?:lar|lari|larning|larining|ning|ni|da|dan|dagi|ga|larida|laridan|lariga|mi|mikin)?\b/i.test(message)) {
+    // MUHIM (Fix #40): "xususiylarini ko'rsat" — "larini" (ko'plik-egalik +
+    // tushum) suffixi ham bor edi, faqat "larni" bor edi. "xususiylarni"
+    // (larni) vs "xususiylarini" (larini) farqlanadi — ikkalasi ham qo'llab-
+    // quvvatlanishi kerak.
+    // MUHIM (Fix): "davlat imtihonlaridan o'tdim" — "davlat" so'zi imtihon
+    // kontekstida institutionCategory EMAS! "davlat imtihoni" = state exam,
+    // "davlat universiteti" emas. Yechim: "davlat imtihon/test/sinov"
+    // birikmasini matndan olib tashlab, qolgan qismda "davlat" so'zini
+    // qidiramiz — shunda "davlat imtihonlaridan o'tdim, davlat universitetiga
+    // kirmoqchiman" dagi ikkinchi "davlat" (universitet konteksti) SAQLANADI.
+    const messageWithoutStateExam = message.replace(/\bdavlat\s+imtihon(?:lar|laridan|idan|dan|ning|ni|ga)?\b/gi, " ");
+    // SEMANTIC TRAP (STAGE 15c — user qoidasi): "davlat ... xohlardim/istardim,
+    // lekin ... yetmadi/olmadi" — ERISHILMAGAN istak. User davlatga kirishni
+    // XOHLAGAN, lekin balli yetmagan → bu institutionCategory EMAS (admissionFailed
+    // konteksti, private-first kerak). Faqat AMALIY davlat istagi
+    // ("tanlamoqchiman", "tavsiya qil", "kerak") kategoriya bo'ladi.
+    // Misollar:
+    //   "davlat universitetiga kirishni xohlardim, lekin ballim yetmadi" → davlat EMAS
+    //   "davlat universitetini tanlamoqchiman" → davlat ✅ (amaliy)
+    //   "davlatga kira olmadim, menga davlat universiteti tavsiya qil" → davlat ✅ (explicit talab)
+    let messageForCat = messageWithoutStateExam;
+    if (/\bdavlat\b[^.!?]{0,80}\b(xohlardim|istardim|xohlagan\s+edim|orzu\s+qilganman|orzu\s+qilardim|xohlayotgan\s+edim)\b[^.!?]{0,120}\b(lekin|biroq|ammo)\b[^.!?]{0,80}\b(yetmadi|yetmayapman|yetmagan|olmadi|olmadim|o'tolmadim|o'ta\s+olmadim|kira\s+olmadim|tusholmadim|chiqmadi)\b/i.test(messageWithoutStateExam)) {
+      messageForCat = messageWithoutStateExam.replace(/\bdavlat\b/gi, " ");
+      console.log(`[SemanticTrap] erishilmagan davlat istagi — kategoriya o'chirildi: "${message.substring(0, 70)}"`);
+    }
+    // NEGATIV DAVLAT ISTAGI (STAGE 15e): "davlat bo'lmasin", "davlat istamayman"
+    // — davlat kategoriyasi EMAS. "davlat imtihonidan o'tdim" (fakt) yoki
+    // "davlatga kira olmadim, menga davlat tavsiya qil" (explicit talab) kabi
+    // holatlarga tegmaydi — negativ fe'l to'g'ridan-to'g'ri davlat istagiga
+    // bog'langan bo'lishi kerak ("davlat ... bo'lmasin").
+    // MUHIM: kategoriya tekshiruvidan OLDIN ishlashi kerak (aks holda davlat
+    // allaqachon catsFound'ga qo'shilib qoladi).
+    // STAGE 19 (fix): \bdavlat\w*\b — "davlatni xohlamayman" (tushum) kabi
+    // suffix'li shakllar ham ushlanadi (ilgari \bdavlat\b "davlatni"ga
+    // mos kelmas, kategoriya qolib ketardi).
+    if (/\bdavlat\w*\b[^.!?]{0,50}\b(istamayman|xohlamayman|kerak emas|bo'lmasin|bo'lmas\b|shart emas|keragi yo'q)\b/i.test(messageForCat)) {
+      messageForCat = messageForCat.replace(/\b(?:davlat|public|state)(?:lar|lari|larning|larining|larini|ning|ni|da|dan|dagi|ga|larida|laridan|lariga|lardan|lardagi|larni|larda|mi|mikin|niki)?\b/gi, " ");
+    }
+    // "niki" suffixi (Fix): "davlatniki", "xususiyniki" — egalik shakli
+    // ("bu universitet davlatniki"). "davliniki" typo'si text-normalizer'da
+    // "davlatniki"ga aylantiriladi.
+    if (/\b(?:davlat|public|state)(?:lar|lari|larning|larining|larini|ning|ni|da|dan|dagi|ga|larida|laridan|lariga|lardan|lardagi|larni|larda|mi|mikin|niki)?\b/i.test(messageForCat)) {
       catsFound.push("3");
     }
-    if (/\b(?:xususiy|nodavlat|private)(?:lar|lari|larning|larining|ning|ni|da|dan|dagi|ga|larida|laridan|lariga|mi|mikin)?\b/i.test(message)) {
+    // NEGATIV ISTAK (STAGE 15c): "Xususiy universitet istamayman" — user
+    // xususiy ISTAMAYapti, kategoriya EMAS. "istamayman/xohlamayman/yoqmaydi"
+    // kontekstidagi xususiy chiqariladi. Amaliy istak ("xususiy kerak",
+    // "xususiylardan qara") saqlanadi.
+    //
+    // STAGE 15e fix: negativ bo'lsa xususiyning HAMMA mention'i olib tashlanadi —
+    // "Xususiy bo'lmasin, lekin yaxshi xususiy bo'lsa ko'rishim mumkin" kabi
+    // gapda ikkinchi (ijobiy) xususiy mention'i qolib, noto'g'ri kategoriya
+    // chiqmasligi kerak. Boshdagi "bo'lmasin" (rad etish) ustun turadi.
+    let messageForXususiy = message;
+    // STAGE 19 (fix): \bxususiy\w*\b — "xususiyni istamayman" kabi suffix'li
+    // shakllar ham ushlanadi.
+    if (/\bxususiy\w*\b[^.!?]{0,50}\b(istamayman|xohlamayman|yoqmaydi|kerak emas|istamayapman|bo'lmasin|bo'lmas\b|shart emas|keragi yo'q)\b/i.test(message)) {
+      messageForXususiy = message.replace(/\b(?:xususiy|nodavlat|private)(?:lar|lari|larning|larining|larini|ning|ni|da|dan|dagi|ga|larida|laridan|lariga|lardan|lardagi|larni|larda|mi|mikin|niki)?\b/gi, " ");
+    }
+    if (/\b(?:xususiy|nodavlat|private)(?:lar|lari|larning|larining|larini|ning|ni|da|dan|dagi|ga|larida|laridan|lariga|lardan|lardagi|larni|larda|mi|mikin|niki)?\b/i.test(messageForXususiy)) {
       catsFound.push("4");
     }
-    if (/\b(?:xalqaro|international)(?:lar|lari|larning|larining|ning|ni|da|dan|dagi|ga|larida|laridan|lariga|mi|mikin)?\b/i.test(message)) {
+    if (/\b(?:xalqaro|international)(?:lar|lari|larning|larining|ning|ni|da|dan|dagi|ga|larida|laridan|lariga|lardan|lardagi|larni|larda|mi|mikin|niki)?\b/i.test(message)) {
       catsFound.push("5");
     }
     if (catsFound.length > 1) {
@@ -684,8 +965,24 @@ export class IntentClassifier {
       entities.institutionCategory = catsFound[0];
     }
 
+    // STAGE 17 (blind): KATEGORIYA BEFARQLIGI — "Xususiy ham davlat ham farqi
+    // yo'q", "davlat yoki xususiy muhim emas" — user kategoriyaga BEFARQ →
+    // institutionCategory UMUMAN qo'yilmaydi (har qanday kategoriya ochiq).
+    // Aks holda "farqi yo'q" deganiga qaramay davlat+xususiy filter qo'yilib,
+    // xalqaro universitеtlar ham chiqib ketardi.
+    if (/\b(?:xususiy|davlat|xalqaro|nodavlat|private|state)\b[^.!?]{0,30}\b(farqi\s+yo'q|muhim\s+emas|ahamiyati\s+yo'q)\b/i.test(message) ||
+        /\b(farqi\s+yo'q|muhim\s+emas)\b[^.!?]{0,30}\b(?:xususiy|davlat|xalqaro)\b/i.test(message)) {
+      delete entities.institutionCategory;
+      delete entities.institutionCategories;
+      console.log(`[CatIndifference] kategoriya befarqligi → filter o'chirildi: "${message.substring(0, 60)}"`);
+    }
+
     // Extract accommodation (yotoqxona) mention
-    if (/\byotoqxona(li|si|sini|)?\b/i.test(message) || /\bakkomodatsiya\b/i.test(message) || /\baccommodation\b/i.test(message) || /\bdormitory\b/i.test(message) || /\bturar joy\b/i.test(message)) {
+    // STAGE 18 (blind): "yotoqxona bo'lmasa ham mayli", "yotoqxona kerak emas" —
+    // mention qilingan, lekin talab EMAS (befarq/rad) → flag qo'yilmaydi.
+    const accommodationMentioned = /\byotoqxona(li|si|sini|)?\b/i.test(message) || /\bakkomodatsiya\b/i.test(message) || /\baccommodation\b/i.test(message) || /\bdormitory\b/i.test(message) || /\bturar joy\b/i.test(message);
+    const accommodationNegated = /\b(yotoqxona|akkomodatsiya|accommodation|dormitory|turar\s*joy)\w*\b[^.!?]{0,45}\b(kerak\s+emas|shart\s+emas|bo'lmasa\s+ham\s+mayli|bo'lmasa\s+mayli|bo'lmasa\s+ham\s+bo'ladi|bo'lmasa\s+bo'ldi|xohlamayman|istamayman|keragi\s+yo'q)\b/i.test(message);
+    if (accommodationMentioned && !accommodationNegated) {
       entities.accommodation = "true";
     }
 
@@ -697,7 +994,9 @@ export class IntentClassifier {
 
     // Sof "X mln" ko'rinishi (gacha/dan yuqori yo'q) → tuitionMax sifatida
     // "Byudjetim 18 mln atrofida" → tuitionMax: 18000000
-    if (!entities.tuitionMax && !entities.tuitionMin) {
+    // STAGE 15e: "oyiga 20 mln topaman" (OYLIK daromad) bu fallback'ga tushib
+    // qolmasligi kerak — extractBudget bilan konsistent bo'lishi uchun.
+    if (!entities.tuitionMax && !entities.tuitionMin && !/\b(oyiga|oylik|har\s+oy)\b/i.test(message)) {
       const approxBudget = message.match(/(\d+(?:[.,]\d+)?)\s*mln\b/i);
       if (approxBudget) {
         const val = parseFloat(approxBudget[1].replace(',', '.'));

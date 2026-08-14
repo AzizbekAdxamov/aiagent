@@ -31,6 +31,9 @@ export interface FollowUpResult {
   intent: IntentResult;
   augmented: boolean;
   additions: string[];
+  /** Fix #34: foydalanuvchi universitеtni rad etdi, lekin nom bermadi —
+   *  provider-manager qaysi universitеtni nazarda tutganini so'raydi. */
+  clarifyUniversity?: boolean;
 }
 
 // STAGE 14/14c — USER STATE EXTRACTORLARI entity-extractor.ts da joylashgan
@@ -75,7 +78,13 @@ export function isSituationalRecommendation(
   // (ruhiy signal) — lekin unda o'qishni davom ettirish niyati ham bor, shuning
   // uchun vaziyat+qiziqish signali bo'lsa recommendation ga o'tkaziladi.
   // Boshqa aniq intent'lar (greeting, thanks, comparison...) o'z yo'liga qoladi.
-  const allowed = ["direction_search", "university_search", "admission", "faq", "unknown", "general_chat"];
+  //
+  // STAGE 14g: grant_search / university_list HAM qo'shildi — "Grantga ballim
+  // yetmadi" yoki "Ballim yetmadi, xususiy universitetlar bormi?" kabi
+  // xabarlar katalog javobi EMAS, vaziyat aytib maslahat kutishdir. Faqat
+  // vaziyat (admissionFailed) BOR bo'lsa o'tkaziladi (GUARD 1.5) — "grantlar
+  // bormi?" kabi oddiy katalog so'rovi katalog qoladi.
+  const allowed = ["direction_search", "university_search", "admission", "faq", "unknown", "general_chat", "grant_search", "university_list"];
   if (!allowed.includes(intent.intent)) {
     return false;
   }
@@ -87,7 +96,17 @@ export function isSituationalRecommendation(
 
   // GUARD 1: aniq university nomi → o'sha univ haqida so'rov (search qoladi)
   // "Toshkent tibbiyot akademiyasida davolash ishi bormi?" → direction_search
-  if (intent.entities?.university) return false;
+  // STAGE 17 (blind): REFERENS sifatida ishlatilgan univ ("menga ham TATUga
+  // o'xshash narsa kerak") — o'sha univ haqida emas, o'xshashlarini so'rash →
+  // recommendation mumkin (classifier STRONG_REC_SIGNALS bilan allaqachon
+  // recommendation qilgan bo'lsa ham bu yerda bloklanmasligi kerak).
+  // STAGE 19 (adversarial): "TATU kabi kuchlisi" — universitеt REFERENS
+  // (o'xshashini so'rayapti), o'sha univ haqida so'rov EMAS → recommendation.
+  const referenceUni = /\b(shunga|unga|o'shanga|shunday|xuddi\s+shu)\s+o'xshash\b|\bunga\s+o'xshab\b|\b\w+\s+kabi\s+(?:kuchli\w*|yaxshi\w*|zo'r\w*|sifatli\w*|kattasi|shunday|o'xshash\w*)\b/i.test(m);
+  // STAGE 18 (blind): "TATUga ballim yetmadi, boshqa variant" — universitеt
+  // KIRISH MUMKIN BO'LMAGAN MAQSAD, so'rov mavzusi EMAS → recommendation.
+  const failedTargetUni = intent.entities?.university && extractAdmissionFailed(m);
+  if (intent.entities?.university && !referenceUni && !failedTargetUni) return false;
 
   // GUARD 1.5 (REVIEWER FIX): general_chat/unknown uchun entity talabi.
   // Intent-classifier'ning GENERAL_CHAT override'i ruhiy maslahatni qasddan
@@ -105,14 +124,39 @@ export function isSituationalRecommendation(
     // ettirishni xohlayapti, ruhiy maslahat so'ramayapti).
     // "orzu qilaman + qanday maslahat berasiz" (ruhiy maslahat) esa wantsToStudy
     // signali bermaydi → general_chat qoladi (reviewer fix).
-    const hasEntity = !!intent.entities?.direction || !!intent.entities?.region || !!intent.entities?.university;
+    const hasEntity = !!intent.entities?.direction || !!intent.entities?.region || !!intent.entities?.university || !!intent.entities?.institutionCategory;
     const hasStudyIntent = extractWantsToStudy(m);
-    if (!hasEntity && !hasStudyIntent) return false;
+    // STAGE 18 (blind): "men davlatga kira olmadim, lekin yana davlatni
+    // xohlayman" — general_chat'ning "olmadim" signali ruhiy maslahat EMAS,
+    // user vaziyatini aytib yechim kutyapti → recommendation mumkin.
+    const hasAdmissionSituation = extractAdmissionFailed(m);
+    // STAGE 18 (blind): PROFILDA ANIQ YO'NALISH bor — user suhbat davomida
+    // qiziqishini aytgan ("men doktor bo'lishni xohlayman"), keyin "nima
+    // qilishim mumkin?" desa — ruhiy maslahat EMAS, o'sha yo'nalish bo'yicha
+    // variantlar kutyapti → recommendation. Yo'nalishsiz (faqat yiqilish/orzu)
+    // profil suhbat qoladi (ruhiy maslahat — reviewer fix).
+    const hasProfileDirection = !!sessionContext?.recommendationProfile?.interests?.length || !!sessionContext?.recommendationProfile?.careerGoal;
+    if (!hasEntity && !hasStudyIntent && !hasAdmissionSituation && !hasProfileDirection) return false;
+  }
+
+  // STAGE 14g GUARD: grant_search / university_list kabi KATALOG intent'lari
+  // faqat xabarda vaziyat BOR bo'lsagina recommendation'ga o'tadi. "Grantlar
+  // bormi?" (katalog so'rovi, vaziyatsiz) → katalog qoladi. "Grantga ballim
+  // yetmadi" (vaziyat) → recommendation. Aks holda katalog javobi chiqib,
+  // userning maslahat kutyotgani e'tiborsiz qolardi.
+  if (intent.intent === "grant_search" || intent.intent === "university_list") {
+    const hasSituationInMsg = extractAdmissionFailed(m);
+    if (!hasSituationInMsg) return false;
   }
 
   // GUARD 2: aniq katalog/ro'yxat so'rovi → search qoladi
   // "Toshkentda tibbiyot yo'nalishi bormi?" / "yo'nalishlari ro'yxati"
-  if (/\b(ro'yxati|katalogi|mavjud|mavjudmi|bormi\??|bormikan|nechta|qancha\s+(?:universitet|yo'nalish)|qaysi\s+(?:universitet|oliygoh)(?:lar|larida|laridan|lariga)?\s+bor)\b/i.test(m)) {
+  // STAGE 14g (reviewer fix): xabarning O'ZIDA vaziyat bo'lsa ("Ballim yetmadi,
+  // xususiy universitetlar bormi?") katalog so'rovi EMAS — user vaziyatini
+  // aytib maslahat kutyapti (recommendation). Faqat vaziyatsiz katalog so'rovi
+  // search qoladi.
+  const catalogLike = /\b(ro'yxati|katalogi|mavjud|mavjudmi|bormi\??|bormikan|nechta|qancha\s+(?:universitet|yo'nalish)|qaysi\s+(?:universitet|oliygoh)(?:lar|larida|laridan|lariga)?\s+bor)\b/i.test(m);
+  if (catalogLike && !extractAdmissionFailed(m)) {
     return false;
   }
 
@@ -130,12 +174,15 @@ export function isSituationalRecommendation(
   // Qiziqish/maqsad signali — user maslahat kutyapti ("qiziqaman",
   // "xohlayman", "orzu qilaman", "bo'lmoqchiman"...)
   const hasInterestSignal =
-    /\b(qiziqaman|qiziqtiradi|yoqadi|yaxshi\s+ko'raman|bo'lmoqchiman|o'qimoqchiman|o'rganmoqchiman|kirmoqchiman|xohlayman|xohlayapman|orzu\s+qilaman|maqsadim|ishlamoqchiman|topshirmoqchiman|topib\s+ber(?:ing)?)\b/i.test(m);
+    /\b(qiziqaman|qiziqtiradi|yoqadi|yaxshi\s+ko'raman|bo'lmoqchiman|o'qimoqchiman|o'rganmoqchiman|kirmoqchiman|xohlayman|xohlayapman|orzu\s+qilaman|maqsadim|ishlamoqchiman|ishlagim\s+keladi|ishlashni\s+(?:xohlayman|istayman|xohlayapman)|ishlamoqchi(?:man)?|topshirmoqchiman|topib\s+ber(?:ing)?|maslahat\s+(?:ber(?:ing)?|berasan|berasiz|qil(?:ing)?|qilasan|qilasiz)|nima\s+qilaman|nima\s+qilishim\s+(?:mumkin|kerak)|yordam\s+(?:ber(?:ing)?|berasiz|kerak|so'rayman)|shunga\s+yordam|taslim\s+bo'lmayman|urinaman|qayta\s+topshiraman|yana\s+urinaman|davom\s+ettirmoqchiman|o'qisam\s+bo'ladimi|o'qishim\s+mumkinmi|boshqa\s+variant|boshqa\s+bormi)\b/i.test(m);
 
   // Vaziyat bildiruvchi shahar iborasi: "Toshkentda yashayman", "Toshkent
   // shahrida" — user kontekstini to'ldiradi (maslahat signali bilan birga).
+  // STAGE 14g: "Toshkentda qolmoqchiman" / "Toshkentda o'qimoqchiman" ham
+  // shahar kontekstini beradi — "Tibbiyotga kira olmadim, Toshkentda
+  // qolmoqchiman" recommendation bo'lishi kerak, direction_search emas.
   const hasLivingContext =
-    /\b(yashayman|yashaymiz|yashayapman|joylashganman|kelganman|yashaydigan)\b/i.test(m);
+    /\b(yashayman|yashaymiz|yashayapman|joylashganman|kelganman|yashaydigan|qolmoqchiman|qolaman|qolishni\s+xohlayman)\b/i.test(m);
 
   // Hozirgi xabarning O'ZIDA ham vaziyat bo'lishi mumkin ("yiqildim, lekin
   // o'qimoqchiman") — profile yig'ilishidan oldin ham ishlashi uchun.
@@ -145,6 +192,94 @@ export function isSituationalRecommendation(
   if (hasSituationContext && (hasInterestSignal || hasLivingContext)) return true;
   // Hozirgi xabarda vaziyat + qiziqish birga kelsa (profil hali bo'lmasa ham)
   if (hasSituationInMsg && hasInterestSignal) return true;
+  // STAGE 18 (blind): vaziyat + ANIQ yo'nalish/kategoriya tanlovi → maslahat.
+  // "kirolmadim, endi xususiyga o'taman" (vaziyat + kategoriya),
+  // "yiqildim, tibbiyotga qiziqaman" (vaziyat + yo'nalish).
+  if (hasSituationInMsg && (intent.entities?.direction || intent.entities?.institutionCategory)) return true;
+  // STAGE 18 (blind): kasb ORZUSI — "maktab o'qituvchisi bo'lishni orzu
+  // qilaman", "doktor bo'lishni orzu qilaman" → maslahat (katalog emas).
+  const hasCareerDream = /\b(?:bo'lishni|bo'lishi|bo'laman)\s+orzu\s+qil(?:aman|adi|ganman)|\borzusi\b|\borzuim\b/i.test(m);
+  if (hasCareerDream && (intent.entities?.direction || intent.entities?.careerGoal)) return true;
+  // STAGE 14g: grant_search / university_list kabi KATALOG intent'larida xabarning
+  // O'ZIDAGI vaziyat ("Grantga ballim yetmadi", "Ballim yetmadi, xususiy
+  // bormi?") kifoya — qiziqish so'zi talab qilinmaydi. User katalog so'ramayapti,
+  // vaziyatini aytib maslahat kutyapti. (GUARD 1.5 allaqachon vaziyatni
+  // tekshirgan — bu yerda faqat katalog intent'lariga maxsus yo'l.)
+  if (
+    (intent.intent === "grant_search" || intent.intent === "university_list" || intent.intent === "university_search") &&
+    hasSituationInMsg
+  ) {
+    return true;
+  }
+
+  // STAGE 15 (fix): "imtihondan o'tdim, qaysi universitet/yonalish tanlashni
+  // bilmayman, shunga yordam ber" — user O'TGAN bo'lishi mumkin (admissionFailed
+  // shart emas!) yoki yangi session (profil bo'sh). Lekin aniq o'qish/universitet
+  // konteksti + yordam/bilmayman signali → user maslahat kutyapti, katalog emas.
+  // FIX (STAGE 15b): "universitetga" / "universitetlar" kabi suffix'li
+  // shakllar \buniversitet\b ga mos kelmaydi (\b "universitet" dan keyin
+  // o'tmaydi) — "qaysi universitetga kirishni bilmay qoldim" recommendation
+  // bo'lmay qolardi. \w* bilan barcha suffix'lar qamrab olinadi.
+  const hasStudyHelpContext =
+    /\b(universitet\w*|oliygoh\w*|institut\w*|o'qish\w*|yo'nalish\w*|yonalish\w*|tanlash\w*|imtihon\w*|qabul\w*)\b/i.test(m) &&
+    /\b(yordam\w*|maslahat\w*|bilmayman|bilmayapman|bilmaymiz|bilmay\s+qoldim|tushuncham\s+yo'q|tushunmayapman|hech\s+narsa\s+bilmayman|umuman\s+bilmayman|nima\s+qilishimni\s+bilmayman|chalkash)\b/i.test(m);
+  if (hasStudyHelpContext) return true;
+
+  // STAGE 18 (blind): ANIQ VARIANT SO'ROVI — "unga ham topib ber", "menga
+  // topib ber" — user o'z/yaqinlari uchun mos variant kutyapti (profil shart
+  // emas): "xotinim ham o'qimoqchi, unga ham topib ber" → recommendation.
+  if (/\btopib\s+ber(?:ing)?\b/i.test(m)) return true;
+
+  // STAGE 18 (blind): QAYTA URINISH / DAVOM — "birinchi yil qoldim, qayta
+  // topshiraman", "yana urinaman" — user taslim bo'lmayapti, yechim kutyapti.
+  if (/\b(qayta\s+topshiraman|qayta\s+topshirish|yana\s+urinaman|yana\s+urinish|taslim\s+bo'lmayman|davom\s+ettirmoqchiman)\b/i.test(m)) return true;
+
+  // STAGE 18 (blind): MOSLIK SO'ROVI — "muhandislikka yaraymanmi", "ITga
+  // yaraymanmi" — yo'nalish mosligi haqida maslahat → recommendation.
+  if (intent.entities?.direction && /\byarayman(?:mi)?\b/i.test(m)) return true;
+
+  // STAGE 19 (adversarial): FIKR O'ZGARISHI — "IT emas, aslida iqtisodga
+  // qiziqaman, oldingi gapimni unut" — user oldingi tanlovini INKOR qilib,
+  // yangi yo'nalishni bildirmoqda → maslahat (yangisiga mos variantlar).
+  if (intent.entities?.direction && /\b(aslida|endi|hozir)\b/i.test(m) && /\b\w+\s+emas\b/i.test(m)) return true;
+
+  // STAGE 19 (adversarial): SHARTLI VARIANT SO'ROVI — "yaxshi universitet
+  // bo'lsa ayt", "variant bo'lsa ko'rsat", "kuchlisi bo'lsa ko'raman" — user
+  // mos variant kutyapti → recommendation (katalog emas).
+  if (/\b(universitet|oliygoh|variant|joy|imkoniyat|kuchli)\w*\b[^.!?]{0,40}\b(bo'lsa\s+(?:ayt|ko'rsat|ber|top|ko'raman|qarayman)|bo'lsa\s+ham\s+bo'ladi)\b/i.test(m)) return true;
+
+  // STAGE 15 (fix): "bankda ishlagim keladi, Toshkentda yashayman, budget 25
+  // mln" — user aniq SHAXSIY TAVSIYA so'rayapti (maqsad + shahar + budget),
+  // katalog emas. Admission vaziyati (yiqilgan) shart EMAS — o'tgan user ham
+  // tavsiya kutyapti. Maqsad signali + shahar/budget → recommendation.
+  const hasGoalSignal =
+    /\b(ishlagim\s+keladi|ishlamoqchiman|ishlamoqchi|ishlasam|bo'lmoqchiman|o'qimoqchiman|kirmoqchiman|qiziqaman|o'rganmoqchiman|xohlayman)\b/i.test(m) ||
+    !!intent.entities?.careerGoal;
+  const hasContextSignal =
+    /\b(yashayman|yashayapman|yashaymiz|turuvchi|joylashgan)\b/i.test(m) ||
+    /\b(budjet(?:im)?|byudjet(?:im)?|to'lay\s+olaman|pul(?:im)?\s+yetadi|kontrakt(?:im)?)\b/i.test(m);
+  if (hasGoalSignal && hasContextSignal) return true;
+  // STAGE 15d (semantic boundary): kasbiy maqsad YOLG'IZ O'ZI ham recommendation
+  // signal — "men bankda ishlamoqchiman" (maslahat kutyapti, katalog emas).
+  // FAKT so'rovi bo'lmasa ("kontrakti/narxi/qancha" → tuition_search qoladi):
+  // "bank ishi kontrakti qancha?" → tuition_search, "TDIUda bank ishi bormi?"
+  // → direction_search (university guard allaqachon qaytargan).
+  const hasCareerOnly = /\b(ishlagim\s+keladi|ishlamoqchiman|ishlamoqchi|bo'lmoqchiman|bo'lmoqchi|bo'lishni\s+(?:xohlayman|istayman))\b/i.test(m);
+  const hasFactQuery = /\b(kontrakt|narx|narh|to'lov|qancha|bormi|nechta|gacha)\b/i.test(m);
+  if (hasCareerOnly && !hasFactQuery && !intent.entities?.university) return true;
+
+  // STAGE 18 (blind): VERGULLI PREFERENCE RO'YXATI — "tibbiyot, Toshkent,
+  // yotoqxona kerak", "20 mln, xususiy, IT" — direction + (shahar/kategoriya/
+  // budget/yotoqxona) vergul bilan sanalgan → katalog so'rovi EMAS, user o'z
+  // afzalliklarini aytib mos variant kutyapti → recommendation.
+  // Katalog so'rovlari ("... bor bormi", "... yo'nalishi bor univlar") vergulsiz
+  // yoki bormi/nechta bilan keladi — ular GUARD 2'da search qoladi.
+  if ((intent.intent === "direction_search" || intent.intent === "university_search") && intent.entities?.direction && /,\s*/.test(m)) {
+    const hasPrefSignal =
+      !!intent.entities?.region || !!intent.entities?.institutionCategory ||
+      intent.entities?.tuitionMax !== undefined || !!intent.entities?.accommodation;
+    if (hasPrefSignal) return true;
+  }
 
   return false;
 }
@@ -174,10 +309,19 @@ export function updateRecommendationProfile(
   const extracted = extractUserProfile(userMessage);
 
   // Qiziqishlar / interests: direction entity yoki yo'nalish sinonimi
+  // STAGE 19 (adversarial): FIKR O'ZGARISHI — "aslida IT emas, tibbiyotga
+  // qiziqaman" — eski yo'nalish O'RNIGA yangisi yoziladi (append emas):
+  // interests=[tibbiyot] (IT yo'qoladi). "ITga qiziqaman" (oddiy bayon) esa
+  // append bo'ladi.
   if (entities?.direction) {
-    const existing = profile.interests || [];
-    if (!existing.includes(entities.direction)) {
-      profile.interests = [...existing, entities.direction];
+    const isChangeOfMind = /\b\w+\s+emas\b/.test(userMessage) && /\b(aslida|endi|hozir)\b/.test(userMessage);
+    if (isChangeOfMind) {
+      profile.interests = [entities.direction];
+    } else {
+      const existing = profile.interests || [];
+      if (!existing.includes(entities.direction)) {
+        profile.interests = [...existing, entities.direction];
+      }
     }
   }
 
@@ -525,9 +669,18 @@ export function augmentFollowUp(
     // REVIEWER FIX: to'liq nomdan olmoshlarni/negativlarni olib tashlash —
     // "Yo'q, men Toshkent tibbiyot akademiyasini aytgandim" da match
     // "men Toshkent tibbiyot" bo'lib qoladi, "men" nomga qo'shilmasligi kerak.
-    const repairFullName = repairFull
-      ? `${repairFull[1].trim().replace(/^(men|mening|menga|menimcha|biz|siz|yo'q|emas|not|u|bu|shu|o'sha|mana)\s+/i, "").trim()} ${repairFull[2].trim()}`
+    const repairNamePart = repairFull
+      ? repairFull[1].trim().replace(/^(men|mening|menga|menimcha|biz|siz|yo'q|emas|not|u|bu|shu|o'sha|mana)\s+/i, "").trim()
       : "";
+    // REVIEWER FIX (Fix #34): "boshqa/o'zga/yana bir" kabi GENERIC so'zlar
+    // haqiqiy nom EMAS — "Yo'q, boshqa universitetni nazarda tutgandim" da
+    // repairFull "boshqa universitet"ni nom deb topib, yolg'on lastUniversity
+    // yozib qo'yishi mumkin edi. Bunday holatda nom bo'sh hisoblanadi →
+    // pastdagi REPAIR-CLARIFICATION bloki qaysi universitеt so'raydi.
+    const repairFullName =
+      repairFull && repairNamePart && !/^(boshqa|boshqasi|boshqasini|o'zga|o'zgasi|yana bir|boshqa bir)$/i.test(repairNamePart)
+        ? `${repairNamePart} ${repairFull[2].trim()}`
+        : "";
     const repairName =
       intent.entities?.university ||
       (repairShort?.[1]?.trim().toUpperCase() || "") ||
@@ -549,6 +702,50 @@ export function augmentFollowUp(
       }
       intent = { ...intent, entities: repairEntities };
       return { effectiveMessage, intent, augmented: true, additions: [repairUni] };
+    }
+
+    // REPAIR-CLARIFICATION (Fix #34): foydalanuvchi oldingi universitеtni RAD
+    // etdi, lekin yangi nom bermadi ("Yo'q, boshqa universitet", "Yo'q, boshqa
+    // bir variant", "boshqasini aytgandim"). Yangi nom yo'q → qaysi
+    // universitеtni nazarda tutganini so'raymiz (taxmin qilmaymiz — aks holda
+    // eski universitеt kartasi takrorlanib, user "yana o'sha" deb qolardi).
+    // "Yo'q, rahmat" kabi suhbat xabarlari clarify EMAS — suhbat so'zlari
+    // bo'lsa o'tkazib yuboramiz. Result flag: clarifyUniversity=true →
+    // provider-manager universityClarificationResponse qaytaradi.
+    const isConversationalRepair =
+      /\b(rahmat|tashakkur|thanks|thank you|ok|yaxshi|bo'pti|mayli|ha|no|bye|xayr)\b/i.test(userMessage);
+    // REVIEWER FIX: boshqa MAVZU tuzatishlari university clarification'ga
+    // hijack bo'lmasin — "Yo'q, boshqa shaharni aytgandim" (region tuzatishi)
+    // yoki "Yo'q, boshqa yo'nalish" university so'rovi EMAS. Faqat universitеt
+    // mavzusi (universitet/oliygoh/institut so'zlari yoki university entity)
+    // birga kelsa clarify qilamiz.
+    // KENGAYTMA (Fix #28/#30): "Yo'q, boshqa narsa so'radim" / "Yo'q, boshqasi"
+    // — boshqa mavzu so'zi (shahar/yo'nalish/soha) yo'q bo'lsa va lastUniversity
+    // BOR bo'lsa, user oldingi universitеtni rad etyapti deb qabul qilamiz →
+    // qaysi mavzuni nazarda tutganini so'raymiz (generic "topa olmadim" o'rniga).
+    const isOtherTopicWord =
+      /\b(shahar|viloyat|yo'nalish|direction|soha|fan|kurs|mavzu)\b/i.test(userMessage);
+    const isUniversityTopicCorrection =
+      /\b(universitet|oliygoh|institut|akademiya)\w*\b/i.test(userMessage) ||
+      !!intent.entities?.university ||
+      (!!sessionContext?.lastUniversity &&
+        !isOtherTopicWord &&
+        /\b(boshqa|boshqasi|boshqasini|boshqacha|narsa|o'zga|yana bir)\b/i.test(userMessage));
+    if (
+      !repairName &&
+      !isRejection &&
+      !isConversationalRepair &&
+      isUniversityTopicCorrection &&
+      /\b(boshqa|boshqasi|boshqasini|o'zga|yana bir)\b/i.test(userMessage)
+    ) {
+      console.log(`[RepairClarification] "${userMessage}" — nom yo'q → qaysi universitеt so'raladi`);
+      return {
+        effectiveMessage,
+        intent: { ...intent, intent: "unknown" as IntentResult["intent"] },
+        augmented: true,
+        additions: [],
+        clarifyUniversity: true,
+      };
     }
   }
 
@@ -763,12 +960,40 @@ export function augmentFollowUp(
   // Resolver attributeWordMatch orqali ishlaydi. Faqat BARE (yo'nalishda,
   // soha bo'yicha) shakllar yangi direction mavzusini bildiradi.
   const hasDirectionTopicWord = /\b(yo'nalish(?:da|dagi|larga|larida)?|soha(?:sida|sidagi|si)?|kasb|mutaxassislik)\b/i.test(userMessage);
+  // RECOMMENDATION PREFERENCE STATEMENT (Fix #85-88): "Yotoqxona ham kerak",
+  // "Grant bo'lsa yaxshi", "Xususiylardan qara", "20 milliondan oshmasin",
+  // "Eng yaxshisini ayt" — bu UNIVERSITET ATTRIBUTE SAVOLI EMAS ("Yotoqxonasi
+  // bormi?"), balki YANGI PREFERENCE (re-ranking uchun). Recommendation dialog
+  // faol bo'lsa (lastWasRecommendation), bunday xabarlar universitеt memory'siga
+  // bog'lanib "yo'nalishlar" yoki "granti" javobiga hijack bo'lmasligi kerak —
+  // ular recommendation dialogga qaytib, yangi preference bilan qayta
+  // saralanadi. ATRIBUT SAVOLLARI ("bormi?", "qancha?") bu yerga kirmaydi.
+  const isPreferenceStatement =
+    // Aniq istak iboralari: "ham kerak", "bo'lsa yaxshi", "bo'lsin"...
+    /\b(ham\s+kerak|bo'lsa\s+(?:yaxshi|zo'r)|bo'lsin|bo'lishi\s+kerak|kerak\s+bo'lsa|o'?shmasin|oshmasin)\b/i.test(userMessage) ||
+    // MUHIM (Fix #42/#60): "Yotoqxona kerak", "Grant kerak", "Xususiy kerak"
+    // — "kerak" yolg'iz ham preference signali ("ham kerak" talab qilinmasin).
+    // Xavfsizlik: faqat ATTRIBUTE/ISTAK so'zlaridan keyin kelgan "kerak"
+    // preference deb hisoblanadi ("universitet kerak" ham — yangi so'rov emas,
+    // recommendation istagi).
+    /\b(?:yotoqxona|grant|stipendiya|xususiy|davlat|xalqaro|nodavlat|universitet|variant)\w*\s+(?:ham\s+)?kerak\b/i.test(userMessage) ||
+    // "grant muhimroq" — preference ustuvorligi (yangi re-ranking signali)
+    /\b(?:grant|yotoqxona|xususiy|davlat|narx|budget)\w*\s+muhim(?:roq|i)?\b/i.test(userMessage) ||
+    // Kategoriya + istak: "Xususiylardan qara", "Davlatdan kerak", "Xalqaro bo'lsin"
+    /\b(xususiy|xususiylar|davlat|xalqaro|nodavlat)\w*\s+(qara|qaraylik|qarang|ko'rsat|kerak|bo'lsin|bo'lsa)\b/i.test(userMessage) ||
+    // Byudjet cheklovi: "20 milliondan oshmasin", "15 mln gacha bo'lsin"
+    hasBudgetMention(userMessage) ||
+    // Eng yaxshi tanlov: "Eng yaxshisini ayt"
+    /\beng\s+yaxshisi\b/i.test(userMessage);
   const isMemoryFollowUp =
     !!lastUniSource?.name &&
     !intent.entities?.university &&
     !intent.entities?.direction &&
     !hasOwnFilter &&
     !hasDirectionTopicWord &&
+    // GUARD (Fix #85-88): recommendation dialog faol bo'lsa, preference
+    // xabarlari universitеtga bog'lanmaydi — dialogga qaytadi (re-ranking).
+    !(lastWasRecommendation && isPreferenceStatement) &&
     // GUARD: pronoun + university so'zi birga kelsa yangi mavzu ("shu
     // universitetda nima bor" → bog'lanmaydi). Pronoun bilan university so'zi
     // kelmasa — 100% university kontekst ("uning narxlari qancha").
@@ -851,7 +1076,7 @@ export function augmentFollowUp(
     }
   }
 
-  if (lastWasRecommendation && wordCount <= 6 && (hasAnswerEntity || isShortAnswer) && !isDataIntentQuery) {
+  if (lastWasRecommendation && wordCount <= 6 && (hasAnswerEntity || isShortAnswer || isPreferenceStatement) && !isDataIntentQuery) {
     // Region entity bo'lsa — sessionContext'ga ham yozamiz (keyingi javobda ishlatiladi)
     if (intent.entities?.region && sessionContext) {
       sessionContext.currentRegion = intent.entities.region as string;

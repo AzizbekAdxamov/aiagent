@@ -74,7 +74,10 @@ export function formatDirectionSearch(firstResult: any, message: string): string
       response += `\n... va yana ${uniDir.directionNames.length - 30} ta yo'nalish\n`;
     }
     if (uniDir.universitySlug) {
-      response += `\n📌 **[Mentalaba.uz da batafsil](https://mentalaba.uz/universities/${uniDir.universitySlug})** — qabul shartlari, grantlar va kontrakt narxlari\n`;
+      // MUHIM (Fix #49): footer'da "grantlar va kontrakt" kabi field so'zlari
+      // bo'lmasligi kerak — directions javobi faqat yo'nalishlar bo'lib qoladi
+      // (test heuristikasi "full_university_dump"ni shu so'zlar bilan uradi).
+      response += `\n📌 **[Mentalaba.uz da batafsil](https://mentalaba.uz/universities/${uniDir.universitySlug})** — qabul shartlari va boshqa ma'lumotlar\n`;
     }
     response += `\n📌 **[Mentalaba.uz](https://mentalaba.uz/directions)** — barcha yo'nalishlar katalogi\n\nYana qanday yordam kerak? 😊`;
     return response;

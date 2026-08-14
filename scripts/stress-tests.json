@@ -1,0 +1,1313 @@
+{
+  "$comment": "Mentalaba AI — 100 Stress Test dataset v2. 12 blok, 100 test. Har bir test: conversation (ketma-ket user xabarlari), expected (kutilgan holat), must_not (bo'lmasligi kerak bo'lgan xatti-harakatlar). Har bir test 5 o'lchovda baholanadi: intent, entity/profile, memory, tool, response. Runner: backend/scripts/run-stress-tests.ts",
+  "meta": {
+    "name": "Mentalaba AI — 100 Stress Test v2",
+    "version": "2.0",
+    "description": "Conversation + memory + recommendation + field extraction + auth + hallucination + correction stress testi. 12 blok × 100 test.",
+    "language": "uz",
+    "metrics": ["intent", "entity_profile", "memory", "tool", "response"],
+    "logFields": ["initialIntent", "finalIntent", "entities", "userProfile", "lastUniversity", "lastRecommendations", "admissionFailed", "wantsToStudy", "preferredCities", "institutionCategory", "budgetMax", "grant", "hostel", "selectedTool", "toolSuccess", "needsClarification", "responseStrategy", "provider", "fallback"]
+  },
+  "tests": [
+    {
+      "id": 1,
+      "block": 1,
+      "blockName": "Oddiy recommendation",
+      "title": "IT + Toshkent",
+      "conversation": ["Men IT o'qimoqchiman, Toshkentda qaysi universitetlarni tavsiya qilasan?"],
+      "expected": {
+        "intent": "recommendation",
+        "directionCategory": "it",
+        "region": "14",
+        "recommendation": true
+      },
+      "must_not": ["clarification_instead", "direction_search_only"]
+    },
+    {
+      "id": 2,
+      "block": 1,
+      "blockName": "Oddiy recommendation",
+      "title": "Tibbiyot + Toshkent",
+      "conversation": ["Men tibbiyotga qiziqaman, Toshkentda o'qimoqchiman"],
+      "expected": {
+        "intent": "recommendation",
+        "directionCategory": "tibbiyot",
+        "region": "14"
+      },
+      "must_not": ["clarification_instead", "direction_search_only"]
+    },
+    {
+      "id": 3,
+      "block": 1,
+      "blockName": "Oddiy recommendation",
+      "title": "Iqtisodiyot — aniqlashtirish yoki tavsiya",
+      "conversation": ["Iqtisodiyot bo'yicha yaxshi universitet kerak"],
+      "expected": {
+        "intent": "recommendation",
+        "directionCategory": "iqtisodiyot"
+      },
+      "must_not": ["random_university_picked", "unrelated_direction"]
+    },
+    {
+      "id": 4,
+      "block": 1,
+      "blockName": "Oddiy recommendation",
+      "title": "Samarqand + IT",
+      "conversation": ["Samarqandda IT o'qimoqchiman"],
+      "expected": {
+        "intent": "recommendation",
+        "directionCategory": "it",
+        "preferredCities": ["samarqand"]
+      },
+      "must_not": ["region_ignored", "toshkent_used"]
+    },
+    {
+      "id": 5,
+      "block": 1,
+      "blockName": "Oddiy recommendation",
+      "title": "Xususiy + Toshkent",
+      "conversation": ["Toshkentda xususiy universitet kerak"],
+      "expected": {
+        "intent": "recommendation",
+        "institutionCategory": "private",
+        "region": "14"
+      },
+      "must_not": ["state_universities_included"]
+    },
+    {
+      "id": 6,
+      "block": 1,
+      "blockName": "Oddiy recommendation",
+      "title": "Davlat filteri",
+      "conversation": ["Davlat universitetlaridan tavsiya qil"],
+      "expected": {
+        "institutionCategory": "state"
+      },
+      "must_not": ["private_universities_included"]
+    },
+    {
+      "id": 7,
+      "block": 1,
+      "blockName": "Oddiy recommendation",
+      "title": "Xalqaro filteri",
+      "conversation": ["Xalqaro universitetlardan tavsiya qil"],
+      "expected": {
+        "institutionCategory": "international"
+      },
+      "must_not": ["state_only_recommended"]
+    },
+    {
+      "id": 8,
+      "block": 1,
+      "blockName": "Oddiy recommendation",
+      "title": "Eng yaxshi 5 ta",
+      "conversation": ["Menga eng yaxshi 5 ta universitetni top"],
+      "expected": {
+        "intent": "recommendation",
+        "topN": 5
+      },
+      "must_not": ["direction_search_only", "single_result_only"]
+    },
+    {
+      "id": 9,
+      "block": 1,
+      "blockName": "Oddiy recommendation",
+      "title": "Arzon — budget aniqlashtirish",
+      "conversation": ["Arzon universitetlardan tavsiya qil"],
+      "expected": {
+        "intent": "recommendation",
+        "budgetSensitive": true
+      },
+      "must_not": ["random_university", "expensive_first"]
+    },
+    {
+      "id": 10,
+      "block": 1,
+      "blockName": "Oddiy recommendation",
+      "title": "Grant filteri",
+      "conversation": ["Grant beradigan universitet kerak"],
+      "expected": {
+        "grant": true
+      },
+      "must_not": ["no_grant_universities_only"]
+    },
+    {
+      "id": 11,
+      "block": 2,
+      "blockName": "Admission failed / yiqilgan abituriyent",
+      "title": "Yiqildim + o'qimoqchiman",
+      "conversation": ["Bu yil imtihondan yiqildim, lekin o'qimoqchiman"],
+      "expected": {
+        "admissionFailed": true,
+        "wantsToStudy": true
+      },
+      "must_not": ["ask_public_or_private", "only_empathy_no_action"]
+    },
+    {
+      "id": 12,
+      "block": 2,
+      "blockName": "Admission failed / yiqilgan abituriyent",
+      "title": "Kira olmadim — nima qilishim mumkin",
+      "conversation": ["Universitetga kira olmadim, nima qilishim mumkin?"],
+      "expected": {
+        "admissionFailed": true,
+        "privateFirst": true
+      },
+      "must_not": ["state_first", "only_empathy_no_action"]
+    },
+    {
+      "id": 13,
+      "block": 2,
+      "blockName": "Admission failed / yiqilgan abituriyent",
+      "title": "Testdan o'tolmadim + Toshkent",
+      "conversation": ["Testdan o'ta olmadim, Toshkentda o'qimoqchiman"],
+      "expected": {
+        "admissionFailed": true,
+        "region": "14",
+        "privateFirst": true
+      },
+      "must_not": ["ask_public_or_private", "state_first"]
+    },
+    {
+      "id": 14,
+      "block": 2,
+      "blockName": "Admission failed / yiqilgan abituriyent",
+      "title": "Davlatga kira olmadim",
+      "conversation": ["Davlatga kira olmadim, endi nima qilaman?"],
+      "expected": {
+        "admissionFailed": true,
+        "privateFirst": true
+      },
+      "must_not": ["recommend_state_first", "only_empathy_no_action"]
+    },
+    {
+      "id": 15,
+      "block": 2,
+      "blockName": "Admission failed / yiqilgan abituriyent",
+      "title": "Grantga ball yetmadi",
+      "conversation": ["Grantga ballim yetmadi"],
+      "expected": {
+        "admissionFailed": true,
+        "alternatives": true
+      },
+      "must_not": ["only_empathy_no_action", "generic_chat_only"]
+    },
+    {
+      "id": 16,
+      "block": 2,
+      "blockName": "Admission failed / yiqilgan abituriyent",
+      "title": "IT + private-first",
+      "conversation": ["Bu yil o'qishga kirolmadim, IT yo'nalishida o'qimoqchiman"],
+      "expected": {
+        "admissionFailed": true,
+        "directionCategory": "it",
+        "privateFirst": true
+      },
+      "must_not": ["ask_public_or_private", "state_first"]
+    },
+    {
+      "id": 17,
+      "block": 2,
+      "blockName": "Admission failed / yiqilgan abituriyent",
+      "title": "Tibbiyot + Toshkent private-first",
+      "conversation": ["Tibbiyotga kira olmadim, Toshkentda qolmoqchiman"],
+      "expected": {
+        "admissionFailed": true,
+        "directionCategory": "tibbiyot",
+        "region": "14",
+        "privateFirst": true
+      },
+      "must_not": ["ask_public_or_private", "state_first"]
+    },
+    {
+      "id": 18,
+      "block": 2,
+      "blockName": "Admission failed / yiqilgan abituriyent",
+      "title": "O'qish orzum bor — davlat default emas",
+      "conversation": ["Men yiqildim, universitetda o'qish orzum bor"],
+      "expected": {
+        "admissionFailed": true,
+        "wantsToStudy": true,
+        "privateFirst": true
+      },
+      "must_not": ["state_default", "ask_public_or_private"]
+    },
+    {
+      "id": 19,
+      "block": 2,
+      "blockName": "Admission failed / yiqilgan abituriyent",
+      "title": "Ball yetmadi + xususiy bormi",
+      "conversation": ["Ballim yetmadi, xususiy universitetlar bormi?"],
+      "expected": {
+        "admissionFailed": true,
+        "institutionCategory": "private"
+      },
+      "must_not": ["state_first"]
+    },
+    {
+      "id": 20,
+      "block": 2,
+      "blockName": "Admission failed / yiqilgan abituriyent",
+      "title": "Xususiylardan tavsiya",
+      "conversation": ["Davlatga kira olmadim, xususiylardan qaysilarini tavsiya qilasan?"],
+      "expected": {
+        "admissionFailed": true,
+        "institutionCategory": "private"
+      },
+      "must_not": ["state_first", "ask_public_or_private"]
+    },
+    {
+      "id": 21,
+      "block": 3,
+      "blockName": "Conversation memory",
+      "title": "IT → Toshkent (2 turn)",
+      "conversation": ["Men IT o'qimoqchiman", "Toshkentda"],
+      "expected": {
+        "directionCategory": "it",
+        "region": "14",
+        "contextIntact": true
+      },
+      "must_not": ["context_broken", "region_ignored"]
+    },
+    {
+      "id": 22,
+      "block": 3,
+      "blockName": "Conversation memory",
+      "title": "Toshkentda IT → qaysi biri yaxshi",
+      "conversation": ["Toshkentda IT", "Qaysi biri yaxshi?"],
+      "expected": {
+        "intent": "recommendation",
+        "directionCategory": "it",
+        "region": "14",
+        "usesLastRecommendations": true
+      },
+      "must_not": ["new_search_instead"]
+    },
+    {
+      "id": 23,
+      "block": 3,
+      "blockName": "Conversation memory",
+      "title": "PDP → kontrakt",
+      "conversation": ["PDP haqida", "Kontrakti qancha?"],
+      "expected": {
+        "lastUniversity": "PDP",
+        "field": "tuition"
+      },
+      "must_not": ["university_reset", "full_university_dump"]
+    },
+    {
+      "id": 24,
+      "block": 3,
+      "blockName": "Conversation memory",
+      "title": "PDP → telefon (faqat)",
+      "conversation": ["PDP", "Telefon raqami?"],
+      "expected": {
+        "lastUniversity": "PDP",
+        "field": "phone"
+      },
+      "must_not": ["full_university_dump", "university_reset"]
+    },
+    {
+      "id": 25,
+      "block": 3,
+      "blockName": "Conversation memory",
+      "title": "PDP → yotoqxona (faqat)",
+      "conversation": ["PDP", "Yotoqxonasi bormi?"],
+      "expected": {
+        "lastUniversity": "PDP",
+        "field": "hostel"
+      },
+      "must_not": ["full_university_dump", "university_reset"]
+    },
+    {
+      "id": 26,
+      "block": 3,
+      "blockName": "Conversation memory",
+      "title": "PDP → sayt (faqat)",
+      "conversation": ["PDP", "Sayti-chi?"],
+      "expected": {
+        "lastUniversity": "PDP",
+        "field": "website"
+      },
+      "must_not": ["full_university_dump", "university_reset"]
+    },
+    {
+      "id": 27,
+      "block": 3,
+      "blockName": "Conversation memory",
+      "title": "TATU → telefon",
+      "conversation": ["TATU haqida", "Telefoni?"],
+      "expected": {
+        "lastUniversity": "TATU",
+        "field": "phone"
+      },
+      "must_not": ["full_university_dump", "university_reset"]
+    },
+    {
+      "id": 28,
+      "block": 3,
+      "blockName": "Conversation memory",
+      "title": "Amity → yo'nalishlari",
+      "conversation": ["Amity haqida", "Yo'nalishlari?"],
+      "expected": {
+        "lastUniversity": "Amity",
+        "field": "directions"
+      },
+      "must_not": ["university_reset"]
+    },
+    {
+      "id": 29,
+      "block": 3,
+      "blockName": "Conversation memory",
+      "title": "Amity → narxi",
+      "conversation": ["Amity", "Narxi?"],
+      "expected": {
+        "lastUniversity": "Amity",
+        "field": "tuition"
+      },
+      "must_not": ["university_reset"]
+    },
+    {
+      "id": 30,
+      "block": 3,
+      "blockName": "Conversation memory",
+      "title": "Amity → grant",
+      "conversation": ["Amity", "Grant bormi?"],
+      "expected": {
+        "lastUniversity": "Amity",
+        "field": "grant"
+      },
+      "must_not": ["university_reset"]
+    },
+    {
+      "id": 31,
+      "block": 4,
+      "blockName": "Context switching / correction",
+      "title": "TATU → EMU repair",
+      "conversation": ["TATU haqida", "Yo'q, EMUni aytgandim"],
+      "expected": {
+        "lastUniversity": "EMU",
+        "repair": true
+      },
+      "must_not": ["tat_u_kept", "university_reset"]
+    },
+    {
+      "id": 32,
+      "block": 4,
+      "blockName": "Context switching / correction",
+      "title": "PDP → Amity repair",
+      "conversation": ["PDP haqida", "Yo'q, Amityni nazarda tutdim"],
+      "expected": {
+        "lastUniversity": "Amity",
+        "repair": true
+      },
+      "must_not": ["pdp_kept", "university_reset"]
+    },
+    {
+      "id": 33,
+      "block": 4,
+      "blockName": "Context switching / correction",
+      "title": "TATU → PDP kerak emas (salbiy)",
+      "conversation": ["TATU", "PDP kerak emas"],
+      "expected": {
+        "lastUniversity": "TATU"
+      },
+      "must_not": ["pdp_selected", "university_reset"]
+    },
+    {
+      "id": 34,
+      "block": 4,
+      "blockName": "Context switching / correction",
+      "title": "Amity → boshqa (clarification)",
+      "conversation": ["Amity", "Yo'q, boshqa universitet"],
+      "expected": {
+        "needsClarification": true
+      },
+      "must_not": ["random_university_picked", "amity_kept"]
+    },
+    {
+      "id": 35,
+      "block": 4,
+      "blockName": "Context switching / correction",
+      "title": "TATU → ikkinchisi",
+      "preConversation": ["Toshkentda IT bo'yicha universitet tavsiya qil."],
+      "conversation": ["TATU", "Ikkinchisi-chi?"],
+      "expected": {
+        "navigationIndex": 1,
+        "usesLastRecommendations": true
+      },
+      "must_not": ["new_search_instead"]
+    },
+    {
+      "id": 36,
+      "block": 4,
+      "blockName": "Context switching / correction",
+      "title": "Recommendation → uchinchisi",
+      "preConversation": ["Toshkentda IT bo'yicha universitet tavsiya qil."],
+      "conversation": ["Uchinchisi?"],
+      "expected": {
+        "navigationIndex": 2,
+        "usesLastRecommendations": true
+      },
+      "must_not": ["new_search_instead"]
+    },
+    {
+      "id": 37,
+      "block": 4,
+      "blockName": "Context switching / correction",
+      "title": "Recommendation → keyingisi",
+      "preConversation": ["Toshkentda IT bo'yicha universitet tavsiya qil."],
+      "conversation": ["Keyingisi?"],
+      "expected": {
+        "navigation": "next",
+        "usesLastRecommendations": true
+      },
+      "must_not": ["new_search_instead"]
+    },
+    {
+      "id": 38,
+      "block": 4,
+      "blockName": "Context switching / correction",
+      "title": "Recommendation → birinchisi haqida",
+      "preConversation": ["Toshkentda IT bo'yicha universitet tavsiya qil."],
+      "conversation": ["Birinchisi haqida"],
+      "expected": {
+        "navigationIndex": 0,
+        "usesLastRecommendations": true
+      },
+      "must_not": ["new_search_instead"]
+    },
+    {
+      "id": 39,
+      "block": 4,
+      "blockName": "Context switching / correction",
+      "title": "Tanlangan → kontrakt",
+      "preConversation": ["Toshkentda IT bo'yicha universitet tavsiya qil.", "Birinchisi haqida"],
+      "conversation": ["Shuni kontrakti qancha?"],
+      "expected": {
+        "field": "tuition",
+        "usesLastRecommendations": true
+      },
+      "must_not": ["university_reset", "new_search_instead"]
+    },
+    {
+      "id": 40,
+      "block": 4,
+      "blockName": "Context switching / correction",
+      "title": "Tanlangan → telefon",
+      "preConversation": ["Toshkentda IT bo'yicha universitet tavsiya qil.", "Birinchisi haqida"],
+      "conversation": ["Shuni telefoni?"],
+      "expected": {
+        "field": "phone",
+        "usesLastRecommendations": true
+      },
+      "must_not": ["university_reset", "new_search_instead"]
+    },
+    {
+      "id": 41,
+      "block": 5,
+      "blockName": "Field extraction",
+      "title": "PDP telefoni — faqat phone",
+      "conversation": ["PDP telefoni qancha?"],
+      "expected": {
+        "lastUniversity": "PDP",
+        "field": "phone"
+      },
+      "must_not": ["full_university_dump"]
+    },
+    {
+      "id": 42,
+      "block": 5,
+      "blockName": "Field extraction",
+      "title": "PDP kontrakti — faqat tuition",
+      "conversation": ["PDP kontrakti qancha?"],
+      "expected": {
+        "lastUniversity": "PDP",
+        "field": "tuition"
+      },
+      "must_not": ["full_university_dump"]
+    },
+    {
+      "id": 43,
+      "block": 5,
+      "blockName": "Field extraction",
+      "title": "PDP yotoqxonasi — faqat hostel",
+      "conversation": ["PDP yotoqxonasi bormi?"],
+      "expected": {
+        "lastUniversity": "PDP",
+        "field": "hostel"
+      },
+      "must_not": ["full_university_dump"]
+    },
+    {
+      "id": 44,
+      "block": 5,
+      "blockName": "Field extraction",
+      "title": "PDP granti — faqat grant",
+      "conversation": ["PDP granti bormi?"],
+      "expected": {
+        "lastUniversity": "PDP",
+        "field": "grant"
+      },
+      "must_not": ["full_university_dump"]
+    },
+    {
+      "id": 45,
+      "block": 5,
+      "blockName": "Field extraction",
+      "title": "PDP qabul — faqat admission",
+      "conversation": ["PDP qabul qilayaptimi?"],
+      "expected": {
+        "lastUniversity": "PDP",
+        "field": "admission"
+      },
+      "must_not": ["full_university_dump"]
+    },
+    {
+      "id": 46,
+      "block": 5,
+      "blockName": "Field extraction",
+      "title": "PDP sayti — faqat website",
+      "conversation": ["PDP sayti bormi?"],
+      "expected": {
+        "lastUniversity": "PDP",
+        "field": "website"
+      },
+      "must_not": ["full_university_dump"]
+    },
+    {
+      "id": 47,
+      "block": 5,
+      "blockName": "Field extraction",
+      "title": "PDP emaili — faqat email",
+      "conversation": ["PDP emaili nima?"],
+      "expected": {
+        "lastUniversity": "PDP",
+        "field": "email"
+      },
+      "must_not": ["full_university_dump"]
+    },
+    {
+      "id": 48,
+      "block": 5,
+      "blockName": "Field extraction",
+      "title": "PDP manzili — faqat address",
+      "conversation": ["PDP manzili qayerda?"],
+      "expected": {
+        "lastUniversity": "PDP",
+        "field": "address"
+      },
+      "must_not": ["full_university_dump"]
+    },
+    {
+      "id": 49,
+      "block": 5,
+      "blockName": "Field extraction",
+      "title": "PDP yo'nalishlar soni — faqat directions",
+      "conversation": ["PDPda nechta yo'nalish bor?"],
+      "expected": {
+        "lastUniversity": "PDP",
+        "field": "directions"
+      },
+      "must_not": ["full_university_dump"]
+    },
+    {
+      "id": 50,
+      "block": 5,
+      "blockName": "Field extraction",
+      "title": "PDP to'liq ma'lumot",
+      "conversation": ["PDP haqida to'liq ma'lumot ber"],
+      "expected": {
+        "lastUniversity": "PDP",
+        "field": "full"
+      },
+      "must_not": ["university_reset"]
+    },
+    {
+      "id": 51,
+      "block": 6,
+      "blockName": "Contextsiz field",
+      "title": "Kontrakt — context yo'q",
+      "conversation": ["Kontrakti qancha?"],
+      "expected": {
+        "needsClarification": true,
+        "clarify": "university"
+      },
+      "must_not": ["random_university_picked"]
+    },
+    {
+      "id": 52,
+      "block": 6,
+      "blockName": "Contextsiz field",
+      "title": "Telefon — context yo'q",
+      "conversation": ["Telefoni nima?"],
+      "expected": {
+        "needsClarification": true,
+        "clarify": "university"
+      },
+      "must_not": ["random_university_picked"]
+    },
+    {
+      "id": 53,
+      "block": 6,
+      "blockName": "Contextsiz field",
+      "title": "Yotoqxona — context yo'q",
+      "conversation": ["Yotoqxonasi bormi?"],
+      "expected": {
+        "needsClarification": true,
+        "clarify": "university"
+      },
+      "must_not": ["random_university_picked"]
+    },
+    {
+      "id": 54,
+      "block": 6,
+      "blockName": "Contextsiz field",
+      "title": "Grant — context yo'q",
+      "conversation": ["Granti bormi?"],
+      "expected": {
+        "needsClarification": true,
+        "clarify": "university"
+      },
+      "must_not": ["random_university_picked"]
+    },
+    {
+      "id": 55,
+      "block": 6,
+      "blockName": "Contextsiz field",
+      "title": "Sayt — context yo'q",
+      "conversation": ["Sayti bormi?"],
+      "expected": {
+        "needsClarification": true,
+        "clarify": "university"
+      },
+      "must_not": ["random_university_picked"]
+    },
+    {
+      "id": 56,
+      "block": 7,
+      "blockName": "Recommendation navigation",
+      "title": "Birinchi",
+      "preConversation": ["Toshkentda IT bo'yicha 5 ta universitet tavsiya qil."],
+      "conversation": ["Birinchisi-chi?"],
+      "expected": {
+        "navigationIndex": 0,
+        "usesLastRecommendations": true
+      },
+      "must_not": ["new_search_instead"]
+    },
+    {
+      "id": 57,
+      "block": 7,
+      "blockName": "Recommendation navigation",
+      "title": "Ikkinchi",
+      "preConversation": ["Toshkentda IT bo'yicha 5 ta universitet tavsiya qil."],
+      "conversation": ["Ikkinchisi-chi?"],
+      "expected": {
+        "navigationIndex": 1,
+        "usesLastRecommendations": true
+      },
+      "must_not": ["new_search_instead"]
+    },
+    {
+      "id": 58,
+      "block": 7,
+      "blockName": "Recommendation navigation",
+      "title": "Uchinchi",
+      "preConversation": ["Toshkentda IT bo'yicha 5 ta universitet tavsiya qil."],
+      "conversation": ["Uchinchisi-chi?"],
+      "expected": {
+        "navigationIndex": 2,
+        "usesLastRecommendations": true
+      },
+      "must_not": ["new_search_instead"]
+    },
+    {
+      "id": 59,
+      "block": 7,
+      "blockName": "Recommendation navigation",
+      "title": "To'rtinchi batafsil",
+      "preConversation": ["Toshkentda IT bo'yicha 5 ta universitet tavsiya qil."],
+      "conversation": ["To'rtinchisi haqida batafsil"],
+      "expected": {
+        "navigationIndex": 3,
+        "usesLastRecommendations": true
+      },
+      "must_not": ["new_search_instead"]
+    },
+    {
+      "id": 60,
+      "block": 7,
+      "blockName": "Recommendation navigation",
+      "title": "Oxirgisi kontrakti",
+      "preConversation": ["Toshkentda IT bo'yicha 5 ta universitet tavsiya qil."],
+      "conversation": ["Oxirgisining kontrakti qancha?"],
+      "expected": {
+        "navigationIndex": -1,
+        "field": "tuition",
+        "usesLastRecommendations": true
+      },
+      "must_not": ["new_search_instead"]
+    },
+    {
+      "id": 61,
+      "block": 8,
+      "blockName": "Noisy / typo Uzbek",
+      "title": "hususiy (typo)",
+      "conversation": ["hususiy"],
+      "expected": {
+        "institutionCategory": "private",
+        "typoHandled": true
+      },
+      "must_not": ["intent_broken"]
+    },
+    {
+      "id": 62,
+      "block": 8,
+      "blockName": "Noisy / typo Uzbek",
+      "title": "xusisiy (typo)",
+      "conversation": ["xusisiy"],
+      "expected": {
+        "institutionCategory": "private",
+        "typoHandled": true
+      },
+      "must_not": ["intent_broken"]
+    },
+    {
+      "id": 63,
+      "block": 8,
+      "blockName": "Noisy / typo Uzbek",
+      "title": "davliniki (typo davlat)",
+      "conversation": ["davliniki"],
+      "expected": {
+        "institutionCategory": "state",
+        "typoHandled": true
+      },
+      "must_not": ["intent_broken"]
+    },
+    {
+      "id": 64,
+      "block": 8,
+      "blockName": "Noisy / typo Uzbek",
+      "title": "kontrakti qancha (contextsiz)",
+      "conversation": ["kontrakti qancha"],
+      "expected": {
+        "field": "tuition",
+        "typoHandled": true
+      },
+      "must_not": ["random_university_picked"]
+    },
+    {
+      "id": 65,
+      "block": 8,
+      "blockName": "Noisy / typo Uzbek",
+      "title": "kantrakt narxi (typo)",
+      "conversation": ["kantrakt narxi"],
+      "expected": {
+        "field": "tuition",
+        "typoHandled": true
+      },
+      "must_not": ["random_university_picked"]
+    },
+    {
+      "id": 66,
+      "block": 8,
+      "blockName": "Noisy / typo Uzbek",
+      "title": "yotoqhonasi bormi (typo)",
+      "conversation": ["yotoqhonasi bormi"],
+      "expected": {
+        "field": "hostel",
+        "typoHandled": true
+      },
+      "must_not": ["random_university_picked"]
+    },
+    {
+      "id": 67,
+      "block": 8,
+      "blockName": "Noisy / typo Uzbek",
+      "title": "telefon nomeri bormi (typo)",
+      "conversation": ["telefon nomeri bormi"],
+      "expected": {
+        "field": "phone",
+        "typoHandled": true
+      },
+      "must_not": ["random_university_picked"]
+    },
+    {
+      "id": 68,
+      "block": 8,
+      "blockName": "Noisy / typo Uzbek",
+      "title": "unversitet (typo university)",
+      "conversation": ["unversitet"],
+      "expected": {
+        "intent": "general",
+        "typoHandled": true
+      },
+      "must_not": ["intent_broken"]
+    },
+    {
+      "id": 69,
+      "block": 8,
+      "blockName": "Noisy / typo Uzbek",
+      "title": "tibbiyotga qiziqaman",
+      "conversation": ["tibbiyotga qiziqaman"],
+      "expected": {
+        "directionCategory": "tibbiyot"
+      },
+      "must_not": ["direction_ignored"]
+    },
+    {
+      "id": 70,
+      "block": 8,
+      "blockName": "Noisy / typo Uzbek",
+      "title": "doktir bolmoqchiman (typo doctor)",
+      "conversation": ["doktir bolmoqchiman"],
+      "expected": {
+        "careerGoal": "doctor",
+        "directionCategory": "tibbiyot"
+      },
+      "must_not": ["tibbiyot_ignored"]
+    },
+    {
+      "id": 71,
+      "block": 9,
+      "blockName": "Recommendation profile kombinatsiyalari",
+      "title": "IT + Toshkent + xususiy",
+      "conversation": ["IT, Toshkent, xususiy"],
+      "expected": {
+        "directionCategory": "it",
+        "region": "14",
+        "institutionCategory": "private"
+      },
+      "must_not": ["any_filter_ignored"]
+    },
+    {
+      "id": 72,
+      "block": 9,
+      "blockName": "Recommendation profile kombinatsiyalari",
+      "title": "IT + Toshkent + davlat",
+      "conversation": ["IT, Toshkent, davlat"],
+      "expected": {
+        "directionCategory": "it",
+        "region": "14",
+        "institutionCategory": "state"
+      },
+      "must_not": ["any_filter_ignored"]
+    },
+    {
+      "id": 73,
+      "block": 9,
+      "blockName": "Recommendation profile kombinatsiyalari",
+      "title": "IT + Samarqand + xususiy",
+      "conversation": ["IT, Samarqand, xususiy"],
+      "expected": {
+        "directionCategory": "it",
+        "preferredCities": ["samarqand"],
+        "institutionCategory": "private"
+      },
+      "must_not": ["any_filter_ignored"]
+    },
+    {
+      "id": 74,
+      "block": 9,
+      "blockName": "Recommendation profile kombinatsiyalari",
+      "title": "Tibbiyot + Toshkent + xususiy",
+      "conversation": ["Tibbiyot, Toshkent, xususiy"],
+      "expected": {
+        "directionCategory": "tibbiyot",
+        "region": "14",
+        "institutionCategory": "private"
+      },
+      "must_not": ["any_filter_ignored"]
+    },
+    {
+      "id": 75,
+      "block": 9,
+      "blockName": "Recommendation profile kombinatsiyalari",
+      "title": "Tibbiyot + Toshkent + davlat",
+      "conversation": ["Tibbiyot, Toshkent, davlat"],
+      "expected": {
+        "directionCategory": "tibbiyot",
+        "region": "14",
+        "institutionCategory": "state"
+      },
+      "must_not": ["any_filter_ignored"]
+    },
+    {
+      "id": 76,
+      "block": 9,
+      "blockName": "Recommendation profile kombinatsiyalari",
+      "title": "Iqtisodiyot + Toshkent + xususiy",
+      "conversation": ["Iqtisodiyot, Toshkent, xususiy"],
+      "expected": {
+        "directionCategory": "iqtisodiyot",
+        "region": "14",
+        "institutionCategory": "private"
+      },
+      "must_not": ["any_filter_ignored"]
+    },
+    {
+      "id": 77,
+      "block": 9,
+      "blockName": "Recommendation profile kombinatsiyalari",
+      "title": "IT + 20 mln gacha",
+      "conversation": ["IT, 20 mln gacha"],
+      "expected": {
+        "directionCategory": "it",
+        "budgetMax": 20000000
+      },
+      "must_not": ["budget_ignored", "over_budget_recommended"]
+    },
+    {
+      "id": 78,
+      "block": 9,
+      "blockName": "Recommendation profile kombinatsiyalari",
+      "title": "IT + grant",
+      "conversation": ["IT, grant kerak"],
+      "expected": {
+        "directionCategory": "it",
+        "grant": true
+      },
+      "must_not": ["grant_ignored"]
+    },
+    {
+      "id": 79,
+      "block": 9,
+      "blockName": "Recommendation profile kombinatsiyalari",
+      "title": "Tibbiyot + yotoqxona",
+      "conversation": ["Tibbiyot, yotoqxona kerak"],
+      "expected": {
+        "directionCategory": "tibbiyot",
+        "hostel": true
+      },
+      "must_not": ["hostel_ignored"]
+    },
+    {
+      "id": 80,
+      "block": 9,
+      "blockName": "Recommendation profile kombinatsiyalari",
+      "title": "IT + ingliz tili",
+      "conversation": ["IT, ingliz tilidagi universitet kerak"],
+      "expected": {
+        "directionCategory": "it",
+        "language": "ingliz"
+      },
+      "must_not": ["language_ignored"]
+    },
+    {
+      "id": 81,
+      "block": 10,
+      "blockName": "Multi-turn recommendation",
+      "title": "Turn 1: yiqildim",
+      "conversation": ["Men bu yil imtihondan yiqildim"],
+      "expected": {
+        "admissionFailed": true
+      },
+      "must_not": ["admission_ignored"]
+    },
+    {
+      "id": 82,
+      "block": 10,
+      "blockName": "Multi-turn recommendation",
+      "title": "Turn 2: IT qiziqish",
+      "conversation": ["Men bu yil imtihondan yiqildim", "IT ga qiziqaman"],
+      "expected": {
+        "admissionFailed": true,
+        "directionCategory": "it"
+      },
+      "must_not": ["context_broken", "direction_ignored"]
+    },
+    {
+      "id": 83,
+      "block": 10,
+      "blockName": "Multi-turn recommendation",
+      "title": "Turn 3: Toshkent",
+      "conversation": ["Men bu yil imtihondan yiqildim", "IT ga qiziqaman", "Toshkentda yashayman"],
+      "expected": {
+        "admissionFailed": true,
+        "directionCategory": "it",
+        "region": "14"
+      },
+      "must_not": ["context_broken"]
+    },
+    {
+      "id": 84,
+      "block": 10,
+      "blockName": "Multi-turn recommendation",
+      "title": "Turn 4: budget",
+      "conversation": ["Men bu yil imtihondan yiqildim", "IT ga qiziqaman", "Toshkentda yashayman", "20 milliondan oshmasin"],
+      "expected": {
+        "admissionFailed": true,
+        "directionCategory": "it",
+        "region": "14",
+        "budgetMax": 20000000
+      },
+      "must_not": ["context_broken", "budget_ignored"]
+    },
+    {
+      "id": 85,
+      "block": 10,
+      "blockName": "Multi-turn recommendation",
+      "title": "Turn 5: yotoqxona",
+      "conversation": ["Men bu yil imtihondan yiqildim", "IT ga qiziqaman", "Toshkentda yashayman", "20 milliondan oshmasin", "Yotoqxona ham kerak"],
+      "expected": {
+        "admissionFailed": true,
+        "directionCategory": "it",
+        "region": "14",
+        "budgetMax": 20000000,
+        "hostel": true
+      },
+      "must_not": ["context_broken", "hostel_ignored"]
+    },
+    {
+      "id": 86,
+      "block": 10,
+      "blockName": "Multi-turn recommendation",
+      "title": "Turn 6: grant",
+      "conversation": ["Men bu yil imtihondan yiqildim", "IT ga qiziqaman", "Toshkentda yashayman", "20 milliondan oshmasin", "Yotoqxona ham kerak", "Grant bo'lsa yaxshi"],
+      "expected": {
+        "admissionFailed": true,
+        "directionCategory": "it",
+        "region": "14",
+        "budgetMax": 20000000,
+        "hostel": true,
+        "grant": true
+      },
+      "must_not": ["context_broken", "grant_ignored"]
+    },
+    {
+      "id": 87,
+      "block": 10,
+      "blockName": "Multi-turn recommendation",
+      "title": "Turn 7: xususiy",
+      "conversation": ["Men bu yil imtihondan yiqildim", "IT ga qiziqaman", "Toshkentda yashayman", "20 milliondan oshmasin", "Yotoqxona ham kerak", "Grant bo'lsa yaxshi", "Xususiylardan qara"],
+      "expected": {
+        "admissionFailed": true,
+        "directionCategory": "it",
+        "region": "14",
+        "budgetMax": 20000000,
+        "hostel": true,
+        "grant": true,
+        "institutionCategory": "private"
+      },
+      "must_not": ["context_broken", "state_first"]
+    },
+    {
+      "id": 88,
+      "block": 10,
+      "blockName": "Multi-turn recommendation",
+      "title": "Turn 8: eng yaxshisi",
+      "conversation": ["Men bu yil imtihondan yiqildim", "IT ga qiziqaman", "Toshkentda yashayman", "20 milliondan oshmasin", "Yotoqxona ham kerak", "Grant bo'lsa yaxshi", "Xususiylardan qara", "Eng yaxshisini ayt"],
+      "expected": {
+        "intent": "recommendation",
+        "admissionFailed": true,
+        "directionCategory": "it",
+        "region": "14",
+        "budgetMax": 20000000,
+        "hostel": true,
+        "grant": true,
+        "institutionCategory": "private",
+        "ranking": true
+      },
+      "must_not": ["context_broken", "ask_public_or_private"]
+    },
+    {
+      "id": 89,
+      "block": 10,
+      "blockName": "Multi-turn recommendation",
+      "title": "Turn 9: birinchi kontrakti",
+      "conversation": ["Men bu yil imtihondan yiqildim", "IT ga qiziqaman", "Toshkentda yashayman", "20 milliondan oshmasin", "Yotoqxona ham kerak", "Grant bo'lsa yaxshi", "Xususiylardan qara", "Eng yaxshisini ayt", "Birinchisining kontrakti qancha?"],
+      "expected": {
+        "field": "tuition",
+        "navigationIndex": 0,
+        "usesLastRecommendations": true
+      },
+      "must_not": ["university_reset", "new_search_instead"]
+    },
+    {
+      "id": 90,
+      "block": 10,
+      "blockName": "Multi-turn recommendation",
+      "title": "Turn 10: telefon",
+      "conversation": ["Men bu yil imtihondan yiqildim", "IT ga qiziqaman", "Toshkentda yashayman", "20 milliondan oshmasin", "Yotoqxona ham kerak", "Grant bo'lsa yaxshi", "Xususiylardan qara", "Eng yaxshisini ayt", "Birinchisining kontrakti qancha?", "Telefon raqami bormi?"],
+      "expected": {
+        "field": "phone",
+        "usesLastRecommendations": true
+      },
+      "must_not": ["university_reset", "new_search_instead"]
+    },
+    {
+      "id": 91,
+      "block": 11,
+      "blockName": "Hallucination / wrong data",
+      "title": "XYZ — mavjud emas",
+      "conversation": ["XYZ universitetining telefoni nima?"],
+      "expected": {
+        "noHallucination": true
+      },
+      "must_not": ["invented_phone", "invented_university"]
+    },
+    {
+      "id": 92,
+      "block": 11,
+      "blockName": "Hallucination / wrong data",
+      "title": "PDP yotoqxona — API false bo'lsa",
+      "conversation": ["PDPda yotoqxona bor ekanmi?"],
+      "expected": {
+        "lastUniversity": "PDP",
+        "field": "hostel",
+        "noHallucination": true
+      },
+      "must_not": ["invented_data"]
+    },
+    {
+      "id": 93,
+      "block": 11,
+      "blockName": "Hallucination / wrong data",
+      "title": "TATU kontrakti 5 mlnmi?",
+      "conversation": ["TATU kontrakti 5 mlnmi?"],
+      "expected": {
+        "lastUniversity": "TATU",
+        "field": "tuition",
+        "noHallucination": true
+      },
+      "must_not": ["invented_tuition", "confirmation_without_data"]
+    },
+    {
+      "id": 94,
+      "block": 11,
+      "blockName": "Hallucination / wrong data",
+      "title": "Amity grant yo'q deyishdi",
+      "conversation": ["Amityda grant yo'q deyishdi, to'g'rimi?"],
+      "expected": {
+        "lastUniversity": "Amity",
+        "field": "grant",
+        "noHallucination": true
+      },
+      "must_not": ["invented_grant", "blind_confirmation"]
+    },
+    {
+      "id": 95,
+      "block": 11,
+      "blockName": "Hallucination / wrong data",
+      "title": "Telefon topib ber — ma'lumot yo'q",
+      "conversation": ["telefonini topib ber"],
+      "expected": {
+        "noHallucination": true
+      },
+      "must_not": ["invented_phone"]
+    },
+    {
+      "id": 96,
+      "block": 12,
+      "blockName": "Eng qattiq stress-test",
+      "title": "Context explosion (10 turn)",
+      "conversation": [
+        "Men Toshkentda yashayman",
+        "ITga qiziqaman",
+        "Bu yil kira olmadim",
+        "20 mln gacha",
+        "xususiy bo'lsin",
+        "yotoqxona kerak",
+        "grant bo'lsa yaxshi",
+        "birinchisi haqida batafsil",
+        "kontrakti?",
+        "telefoni?"
+      ],
+      "expected": {
+        "admissionFailed": true,
+        "directionCategory": "it",
+        "region": "14",
+        "budgetMax": 20000000,
+        "institutionCategory": "private",
+        "hostel": true,
+        "grant": true,
+        "contextIntact": true
+      },
+      "must_not": ["context_broken", "ask_public_or_private", "university_reset"]
+    },
+    {
+      "id": 97,
+      "block": 12,
+      "blockName": "Eng qattiq stress-test",
+      "title": "Negative correction (TATU → EMU → kontrakt)",
+      "conversation": ["TATU haqida ma'lumot ber", "Yo'q, EMUni aytgandim", "Kontrakti?"],
+      "expected": {
+        "lastUniversity": "EMU",
+        "field": "tuition",
+        "repair": true
+      },
+      "must_not": ["tat_u_kept", "context_broken"]
+    },
+    {
+      "id": 98,
+      "block": 12,
+      "blockName": "Eng qattiq stress-test",
+      "title": "False repair — yangi query",
+      "conversation": ["Toshkentda davlat universitetlari kerak"],
+      "expected": {
+        "institutionCategory": "state",
+        "region": "14",
+        "isNewQuery": true
+      },
+      "must_not": ["repair_mistake", "state_ignored"]
+    },
+    {
+      "id": 99,
+      "block": 12,
+      "blockName": "Eng qattiq stress-test",
+      "title": "Guest user — ma'lumot yopiq",
+      "conversation": ["Men ITga qiziqaman, Toshkentda universitet tavsiya qil"],
+      "expected": {
+        "guestMode": true,
+        "guestModeAcceptable": ["login_taklifi", "clarification"]
+      },
+      "must_not": ["guest_data_leak", "unrequested_private_data"]
+    },
+    {
+      "id": 100,
+      "block": 12,
+      "blockName": "Eng qattiq stress-test",
+      "title": "FINAL BOSS — 14-xabar end-to-end",
+      "conversation": [
+        "Salom",
+        "Men bu yil imtihondan yiqildim",
+        "Lekin universitetda o'qish orzuyim bor",
+        "Men yoshligimdan ITga qiziqaman",
+        "Toshkentda yashayman",
+        "20 mln gacha bo'lsa yaxshi",
+        "xususiy universitetlardan qaraylik",
+        "yotoqxona ham kerak",
+        "grant bo'lsa yaxshi",
+        "qaysi birini tavsiya qilasan?",
+        "birinchisi haqida batafsil ber",
+        "yo'nalishlari qanday?",
+        "kontrakti qancha?",
+        "telefon raqami bormi?"
+      ],
+      "expected": {
+        "startIntent": "greeting",
+        "profileBuilt": {
+          "admissionFailed": true,
+          "wantsToStudy": true,
+          "directionCategory": "it",
+          "region": "14",
+          "institutionCategory": "private",
+          "budgetMax": 20000000,
+          "hostel": true,
+          "grant": true
+        },
+        "recommendationPrivateFirst": true,
+        "finalField": "phone",
+        "contextIntact": true
+      },
+      "must_not": [
+        "context_broken",
+        "ask_public_or_private",
+        "state_default",
+        "budget_ignored",
+        "university_reset"
+      ]
+    }
+  ]
+}

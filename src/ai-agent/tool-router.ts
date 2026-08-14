@@ -7,6 +7,94 @@ import { detectDirectionCategory } from "./direction-synonyms";
 import { detectExactDirection, normalizeDirectionName } from "./exact-direction";
 import { getIntentHandler } from "./intent-config";
 import { normalizeUserText } from "./text-normalizer";
+import { computeRecommendationDecision } from "./decision-engine";
+import { validateRecommendationResults } from "./result-validator";
+import { computeUniversityQuality } from "./university-quality";
+import { REGION_NAME_TO_ID } from "./llm-entity-extractor";
+
+/**
+ * Region qiymatini ID formatiga keltiradi.
+ * MUHIM (Fix 15-fail): profile.city / preferredCities kabi manbalar region
+ * NOMINI saqlashi mumkin ("toshkent"), filter esa parseInt(region) bilan ID
+ * kutadi — nom kelganda NaN bo'lib "0 ta natija" berardi. Barcha region
+ * manbalari shu helper orqali o'tkaziladi.
+ */
+export function normalizeRegionToId(region: string | undefined | null): string | undefined {
+  if (!region) return undefined;
+  const trimmed = String(region).trim().toLowerCase();
+  // Allaqachon ID (raqam) bo'lsa — o'zgartirmaymiz
+  if (/^\d+$/.test(trimmed)) return trimmed;
+  // NOM bo'lsa — ID ga map qilamiz
+  const id = REGION_NAME_TO_ID[trimmed];
+  if (id) return id;
+  // "toshkent shahri" kabi qo'shimcha suffix'li shakllarni ham sinab ko'ramiz
+  const base = trimmed.replace(/\.? (shahri|viloyati|respublikasi)$/i, "");
+  const baseId = REGION_NAME_TO_ID[base];
+  if (baseId) return baseId;
+  return undefined;
+}
+
+/**
+ * STAGE 14g — UNIVERSITET KATEGORIYASI (SHARED HELPER):
+ * normalize qilingan universitеtning kategoriyasini ID va NOM bo'yicha aniqlaydi
+ * ("Davlat universiteti" nomi yoki institutionCategoryId="3" → state).
+ * searchDirection() sort'i va recommend() admissionFailed bonus'ida bir xil
+ * logika ishlatiladi — kod takrorlanmaydi (reviewer fix).
+ */
+export type UniversityCategoryRank = "private" | "international" | "state" | "other";
+
+/**
+ * STAGE 15c — HARD BUDGET FILTER (SHARED HELPER):
+ * Byudjet — SOFT scoring emas, HARD CONSTRAINT. Foydalanuvchi "20 mln gacha"
+ * desa, minimal kontrakti 25 mln bo'lgan univ recommendation'dan CHIQARILADI
+ * (LLM uni "yaxshi variant" deb yubormasligi uchun tool darajasida).
+ *
+ * Qoidalar:
+ *   - tuitionMax set → minimal narx > tuitionMax → chiqariladi
+ *   - tuitionMax set → faqat maksimal narx ma'lum va u > tuitionMax → chiqariladi
+ *   - tuitionMin set → maksimal narx < tuitionMin → chiqariladi
+ *   - Narx ma'lumoti yo'q (null/undefined) univlar QOLADI (scoring neytral)
+ *
+ * HAMMA yo'nalishlarga tegishli — directionCategory'ga bog'liq EMAS.
+ * recommend() va testlar bir xil logika ishlatishi uchun export qilingan.
+ */
+export function applyHardBudgetFilter(
+  universities: any[],
+  preferences: { tuitionMax?: number; tuitionMin?: number }
+): { kept: any[]; removedCount: number; allRemoved: boolean } {
+  if (preferences.tuitionMax === undefined && preferences.tuitionMin === undefined) {
+    return { kept: universities, removedCount: 0, allRemoved: false };
+  }
+  const budgetFiltered = universities.filter((u: any) => {
+    const minFee = u.minimal_tuition_fee ?? u.minimalTuitionFee;
+    const maxFee = u.maximal_tuition_fee ?? u.maximalTuitionFee;
+    if (preferences.tuitionMax !== undefined) {
+      // minimal narx byudjetdan yuqori → HARD chiqarish
+      if (minFee !== undefined && minFee !== null && minFee > preferences.tuitionMax) return false;
+      // faqat maksimal narx ma'lum va u ham byudjetdan yuqori → chiqarish
+      if ((minFee === undefined || minFee === null) && maxFee !== undefined && maxFee !== null && maxFee > preferences.tuitionMax) return false;
+    }
+    if (preferences.tuitionMin !== undefined) {
+      // maksimal narx minimal byudjetdan past → HARD chiqarish
+      if (maxFee !== undefined && maxFee !== null && maxFee < preferences.tuitionMin) return false;
+    }
+    return true;
+  });
+  return {
+    kept: budgetFiltered,
+    removedCount: universities.length - budgetFiltered.length,
+    allRemoved: budgetFiltered.length === 0 && universities.length > 0,
+  };
+}
+
+export function universityCategoryRank(uni: any): UniversityCategoryRank {
+  const catName = (uni?.institutionCategory || uni?.institutionType || "").toLowerCase();
+  const catId = String(uni?.institutionCategoryId ?? uni?.institution_category_id ?? "");
+  if (catId === "4" || /xususiy/.test(catName)) return "private";
+  if (catId === "5" || /xalqaro/.test(catName)) return "international";
+  if (catId === "3" || /davlat/.test(catName)) return "state";
+  return "other";
+}
 
 export class ToolRouter {
   // Location -> region ID mapping (15 ta viloyat)
@@ -1657,6 +1745,29 @@ export class ToolRouter {
         .filter((u: any) => u?.id)
         .map((u: any) => this.normalizeUniversity(u));
 
+      // STAGE 14g (user qoidasi): searchDirection ham admissionFailed'ni hisobga oladi!
+      // "imtihondan yiqildim → tibbiyot → qaysi universitetlarda bor?" — user
+      // xususiy/xalqaro ustuvorligini kutadi (recommend() dagi kabi). Oldin bu
+      // yerda hech qanday scoring yo'q edi — xususiy va davlat aralash tartibda
+      // chiqardi. Endi admissionFailed=true bo'lsa va user explicit kategoriya
+      // so'ramagan bo'lsa, xususiy/xalqaro birinchi o'ringa chiqadi (davlat
+      // butunlay yo'qolmaydi — pastroqda qoladi).
+      // REVIEWER FIX: explicit kategoriya — intent entity'lari YOKI session
+      // kontekstdagi oldingi tanlov ("davlat kerak" deyilgan bo'lsa). Ikkalasi
+      // ham yo'q bo'lsagina admissionFailed private-first sort ishlaydi
+      // (explicit user talabi > avtomatik inference).
+      const searchAdmissionFailed =
+        sessionContext?.recommendationProfile?.admissionFailed === true &&
+        !intent.entities?.institutionCategory &&
+        !intent.entities?.institutionCategories?.length &&
+        !sessionContext?.currentInstitutionCategory;
+      if (searchAdmissionFailed && enrichedUniversities.length > 1) {
+        const CAT_ORDER: Record<UniversityCategoryRank, number> = { private: 0, international: 1, state: 2, other: 3 };
+        // STABLE sort (V8/Node 14+): bir xil kategoriyadagilar asl tartibida qoladi
+        enrichedUniversities.sort((a: any, b: any) => CAT_ORDER[universityCategoryRank(a)] - CAT_ORDER[universityCategoryRank(b)]);
+        console.log("[Direction] admissionFailed → xususiy/xalqaro birinchi o'ringa chiqarildi");
+      }
+
       // Ko'rsatilayotgan universitetlarga oid yo'nalishlar (shuffle bilan mos keladi)
       // Agar advanced filter ba'zi universitetlarni chiqarib yuborgan bo'lsa,
       // ularning yo'nalishlari ham ko'rsatilmaydi (ichki konsistensiya).
@@ -2337,7 +2448,7 @@ export class ToolRouter {
 
       // Intent entities dan olish
       const entities = intent.entities || {};
-      if (entities.region) preferences.region = entities.region;
+      if (entities.region) preferences.region = normalizeRegionToId(entities.region);
       if (entities.institutionCategory) preferences.institutionCategory = entities.institutionCategory;
       // MUHIM (Fix): "davlat yoki xalqaro" → ["3", "5"] — ikkala kategoriya
       // ham filterda ishlatiladi (bitta emas).
@@ -2376,7 +2487,7 @@ export class ToolRouter {
 
       // Session context dan olish
       if (sessionContext) {
-        if (!preferences.region && sessionContext.currentRegion) preferences.region = sessionContext.currentRegion;
+        if (!preferences.region && sessionContext.currentRegion) preferences.region = normalizeRegionToId(sessionContext.currentRegion);
         if (!preferences.institutionCategory && sessionContext.currentInstitutionCategory) 
           preferences.institutionCategory = sessionContext.currentInstitutionCategory;
         // Fix: follow-up'da ham "davlat yoki xalqaro" kombinatsiyasi saqlanadi
@@ -2399,7 +2510,9 @@ export class ToolRouter {
       const profile = sessionContext?.recommendationProfile;
       if (profile) {
         // Home region (qayerdan, emas qayerda o'qishni xohlayman)
-        if (!preferences.region && profile.city) preferences.region = profile.city;
+        // MUHIM (Fix 15-fail): profile.city NOM saqlaydi ("toshkent") — filter
+        // ID kutadi. Nom → ID normalizatsiyasi, aks holda parseInt→NaN→0 natija.
+        if (!preferences.region && profile.city) preferences.region = normalizeRegionToId(profile.city);
         if (!preferences.degree && profile.degree) preferences.degree = profile.degree;
         if (!preferences.language && profile.language) preferences.language = profile.language;
         // YANGI: ingliz darajasi
@@ -2440,7 +2553,12 @@ export class ToolRouter {
         `region=${preferences.region}, preferredCities=${JSON.stringify(preferences.preferredCities)}, ` +
         `budget=${preferences.tuitionMax}, grant=${preferences.interestGrant}, ` +
         `hostel=${preferences.interestAccommodation}, international=${preferences.wantsInternational}, ` +
-        `englishLevel=${preferences.englishLevel}, careerGoal=${preferences.careerGoal}`);
+        `englishLevel=${preferences.englishLevel}, careerGoal=${preferences.careerGoal}, ` +
+        // MUHIM (diagnostika): admissionFailed/privateFirst ham logda ko'rinishi
+        // kerak — aks holda debug'da "admissionFailed toolga o'tmagan" degan
+        // noto'g'ri xulosa chiqadi (u preferences'ga o'tadi, faqat log'da yo'q edi).
+        `admissionFailed=${preferences.admissionFailed === true}, privateFirst=${preferences.privateFirst === true}, ` +
+        `institutionCategory=${preferences.institutionCategory || (preferences.institutionCategories?.length ? preferences.institutionCategories.join(",") : "-")}`);
 
       // User message dan direction category ni aniqlash
       // MUHIM: includes(cat) ishlatilmaydi — "tarjima" tarkibidagi "it" sabab IT ga tushib ketadi!
@@ -2467,9 +2585,18 @@ export class ToolRouter {
       }
 
       // ===== 2. MUHIM ma'lumotlar tekshiruvi =====
-      const missing: string[] = [];
-      if (!preferences.region) missing.push("region");
-      if (!preferences.directionCategory) missing.push("directionCategory");
+      // STAGE 15f: missing ma'lumot tekshiruvi DECISION ENGINE'ga ko'chirildi
+      // (shared pure funksiya — regression testlar bilan bir xil logika).
+      // IntentResult.confidence endi ham hisobga olinadi (direct/clarify).
+      const decision = computeRecommendationDecision({
+        intent: "recommendation",
+        intentConfidence: intent.confidence ?? 0.85,
+        direction: preferences.directionCategory,
+        region: preferences.region,
+        budget: preferences.tuitionMax,
+        message: userMessage,
+      });
+      const missing: string[] = decision.missing;
       // STAGE 14d (user qoidasi): imtihondan yiqilgan foydalanuvchidan
       // "davlatmi yoki xususiymi?" deb SO'RALMAYDI — vaziyatning o'zi javob:
       // private-first strategiya avtomatik qo'llaniladi (scoring xususiy/xalqaroni
@@ -2479,9 +2606,13 @@ export class ToolRouter {
         preferences.admissionFailed === true &&
         !preferences.institutionCategory &&
         !preferences.institutionCategories?.length;
-      if (!preferences.institutionCategory && !preferences.institutionCategories?.length && !admissionFailedNoCategory) {
-        missing.push("institutionCategory");
-      }
+      // Fix #40 (BOSQICH 14): "Davlatmi yoki xususiy?" savoli AVTOMATIK
+      // so'ralmaydi — "Toshkentda IT bo'yicha tavsiya qil" kabi so'rovda
+      // region+direction yetarli, kategoriya bo'lmasa ham tavsiya boshlanadi
+      // (skoring barcha kategoriyalarni baholaydi, xususiy/davlat teng).
+      // User "faqat davlat" / "xususiy kerak" desa — explicit filter ishlaydi.
+      // Bu "Davlatmi yoki xususiy?" loop'ini butunlay yo'qotadi: tavsiya
+      // hech qachon so'ralsa ham javob bermasdan qolmaydi.
       // private-first marker — tool result va LLM context uchun ko'rinadigan
       // bo'ladi (nima uchun xususiy/xalqaro ustuvor ekani aniq ko'rsatiladi).
       if (admissionFailedNoCategory) {
@@ -2494,15 +2625,13 @@ export class ToolRouter {
       // MUHIM (reviewer): savol qo'shimchali shakllar ham qo'shildi (bilmammi,
       // bilmaymanmi) va barcha preference'lar to'lgan bo'lsa, cantAnswer EMAS —
       // o'sha holda tavsiyalar ko'rsatiladi.
-      const noAnswerPhrases = /\b(bilmadim|bilmayman|bilmayapman|bilolmayman|bilmasam|bilmiman|bilmam|bilmammi|bilmaymanmi|tanlovim yo'q|xohlamayman|nimani tanlashni bilmayman|o'zim bilmayman|nima bilay)\b/i.test(userMessage || "");
       // MUHIM (Fix): "Men tarix faniga qiziqaman lekin qanday universitetda o'qishni
       // bilmayman" — user "bilmayman" deyapti, lekin YO'NALISHNI biladi (tarix).
       // Direction aniqlangan bo'lsa cantAnswer ishlamaydi — shu yo'nalish bo'yicha
       // tavsiyalar qidiriladi. CantAnswer faqat YO'NALISH HAM noaniq bo'lganda
       // ("men nima o'qishni bilmayman") yo'nalishlar ro'yxati taklif qilinadi.
-      // cantAnswer: user "bilmadim" desa — cheksiz savol so'ramaymiz,
-      // yo'nalishlar ro'yxati taklif qilinadi (faqat YO'NALISH ham noaniq bo'lsa).
-      const cantAnswer = noAnswerPhrases && missing.length > 0 && !preferences.directionCategory;
+      // STAGE 15f: cantAnswer qarori ham decision engine'dan keladi.
+      const cantAnswer = decision.cantAnswer === true && missing.length > 0;
       if (cantAnswer) {
         console.log(`[Recommend] "bilmadim" — javob berilmadi, yo'nalishlar ro'yxati taklif qilinmoqda`);
         return {
@@ -2801,6 +2930,37 @@ export class ToolRouter {
         }
       }
 
+      // ===== HARD BUDGET FILTER (Stage 15 — user qoidasi) =====
+      // STAGE 19 (pipeline trace): yo'nalish filtri natijasi — keyingi bosqich
+      // hisobida qatnashishi uchun saqlanadi (debug trace qatorida).
+      const afterDirectionFilter = recommendableUnis.length;
+      // Byudjet — SOFT scoring emas, HARD CONSTRAINT. Foydalanuvchi "20 mln
+      // gacha" desa, minimal kontrakti 25 mln bo'lgan Amity hech qachon top-5
+      // ga chiqmasligi kerak (LLM uni "yaxshi variant" deb yubormasligi uchun
+      // tool darajasida chiqarib tashlanadi).
+      //   tuitionMax set  → minimal narx > tuitionMax  → chiqariladi
+      //   tuitionMin set  → maksimal narx < tuitionMin  → chiqariladi
+      // Narx ma'lumoti yo'q (null/undefined) univlar qoladi — lekin scoring'da
+      // budget bo'limi neytral (12) qoladi, bonus olmaydi.
+      // MUHIM: bu qoida barcha yo'nalishlarga tegishli (it/tibbiyot/iqtisod...)
+      // — directionCategory'ga bog'liq EMAS, universal qoida.
+      let budgetRemovedCount = 0;
+      if (preferences.tuitionMax !== undefined || preferences.tuitionMin !== undefined) {
+        const beforeBudget = recommendableUnis.length;
+        const { kept: budgetFiltered, removedCount, allRemoved } = applyHardBudgetFilter(recommendableUnis, preferences);
+        budgetRemovedCount = removedCount;
+        if (!allRemoved) {
+          recommendableUnis = budgetFiltered;
+          console.log(`[Recommend] Hard budget filter: ${removedCount} ta (byudjet chegarasidan yuqori/past) chiqarildi`);
+        } else {
+          // BARCHASI byudjetga mos emas — bo'sh qaytarmaymiz, eng yaqin
+          // variantlarni qoldirib, LLM ularni byudjetdan yuqori ekanini aytadi.
+          // (Hamma univ chiqib ketsa, user hech qanday variant ko'rmaydi —
+          // bu ham yomon tajriba. Eng yaqin 5 tasini past ball bilan ko'rsatamiz.)
+          console.log(`[Recommend] Hard budget filter: barchasi byudjetdan tashqarida — eng yaqinlari qoldirilmoqda`);
+        }
+      }
+
       // MUHIM (Fix: ranking): barcha hard-filterdan o'tgan univlar normalize
       // qilinadi va SCORE qilinadi (slice EMAS!). Ilgari `slice(0, 5)` scoring'dan
       // OLDIN qilinardi — 6-o'rinda turgan, lekin balli yuqori bo'lgan univ hech
@@ -2830,10 +2990,51 @@ export class ToolRouter {
         ...u,
         score: this.computeRecommendationScore(u, preferences, uniMatchedDirs.get(u.id) || []),
       }));
-      // Ball bo'yicha saralash (yuqoridan pastga)
-      scoredUnis.sort((a: any, b: any) => b.score.total - a.score.total);
-      // Qat'iy Top-5 Cutoff
-      const top5Recommendations = scoredUnis.slice(0, 5);
+      // Ball bo'yicha saralash (yuqoridan pastga). STAGE 17: total teng bo'lsa
+      // — UNIVERSITET SIFATI (0-15) tie-break: policy'ga teng keladiganlar
+      // orasida real sifat (tajriba, talabalar soni, akkreditatsiya...) ustun.
+      scoredUnis.sort((a: any, b: any) =>
+        b.score.total - a.score.total || (b.score.breakdown?.quality || 0) - (a.score.breakdown?.quality || 0)
+      );
+
+      // ===== STAGE 16: RESULT VALIDATION (tool natijasi policy tekshiruvi) =====
+      // LLM hech qachon business rule'ni buzolmasligi uchun skoringdan O'TKAN
+      // kandidatlar yana bir bor audit qilinadi: budget qat'iy cheklovi,
+      // kategoriya, takroriy nom, yiqilgan user uchun davlat (downrank),
+      // shahar mosligi. REJECT bo'lganlar mudofaa sifatida top-5 dan chiqariladi
+      // (filtirlar oldin ishlagan bo'lsa ham — ikki qavat himoya).
+      // Natija `validation` kontrakti bilan tool data'ga qo'shiladi — LLM faqat
+      // `accepted` ro'yxatni tushuntiradi, rejected/downranked sabablarini ham ko'radi.
+      const validation = validateRecommendationResults(
+        enrichedUnis.map((u: any) => ({
+          name: u.fullNameUz || u.fullNameEn || "",
+          institutionCategoryId: u.institutionCategoryId,
+          institutionCategory: u.institutionCategory,
+          minimalTuitionFee: u.minimalTuitionFee,
+          maximalTuitionFee: u.maximalTuitionFee,
+          location: u.location_uz || u.location,
+          matchedDirections: uniMatchedDirs.get(u.id) || [],
+        })),
+        preferences as any
+      );
+      const rejectedNames = new Set(validation.rejected.map((r) => r.name));
+      // Qat'iy Top-5 Cutoff (REJECT bo'lganlar chiqariladi)
+      let top5Recommendations = scoredUnis.filter((u: any) => !rejectedNames.has(u.fullNameUz || u.fullNameEn || "")).slice(0, 5);
+      console.log(`[ResultValidator] accepted=${validation.accepted.length}, downranked=${validation.downranked.length}, rejected=${validation.rejected.length} (${validation.constraintsApplied.join(" | ")})`);
+
+      // ===== STAGE 19: PIPELINE TRACE (debugging) =====
+      // Har bosqichdagi sonlar bir qatorda — reklama oqimini kuzatish oson:
+      //   DISCOVERY=46 → DIRECTION_FILTER=20 → BUDGET_REJECT=6 →
+      //   POLICY_ACCEPT=13 → POLICY_DOWNRANK=1 → POLICY_REJECT=0 → FINAL=5
+      console.log(
+        `[Recommend.Pipeline] DISCOVERY=${matchedUniversities.length} | ` +
+        `DIRECTION_FILTER=${afterDirectionFilter} | ` +
+        `BUDGET_REJECT=${budgetRemovedCount} | ` +
+        `POLICY_ACCEPT=${validation.accepted.length} | ` +
+        `POLICY_DOWNRANK=${validation.downranked.length} | ` +
+        `POLICY_REJECT=${validation.rejected.length} | ` +
+        `FINAL=${top5Recommendations.length}`
+      );
 
       // ===== RECOMMENDATION MEMORY (BOSQICH 9) =====
       if (sessionContext && top5Recommendations.length > 0) {
@@ -2869,6 +3070,23 @@ export class ToolRouter {
           recommendations: top5Recommendations,
           directions: matchedDirections.slice(0, 10),
           grants: grants.slice(0, 5),
+          // STAGE 16: RESULT VALIDATION kontrakti — LLM faqat ACCEPT bo'lgan
+          // natijalarni tushuntiradi; REJECT/DOWNRANK sabablari kontekstda.
+          validation: {
+            accepted: validation.accepted.slice(0, 10),
+            downranked: validation.downranked.slice(0, 10),
+            rejected: validation.rejected.slice(0, 10),
+            constraintsApplied: validation.constraintsApplied,
+          },
+          // STAGE 15f/17: DECISION kontrakti (mode/confidence/missing) — LLM
+          // "qaror qilmaydi, qarorni tushuntiradi": qaysi rejimda ishlagani
+          // va nima yetishmagani kontekstda aniq ko'rinadi.
+          decision: {
+            mode: decision.mode,
+            confidence: decision.confidence,
+            missing: decision.missing,
+            reason: decision.reason,
+          },
         },
       };
     } catch (error: any) {
@@ -2883,7 +3101,7 @@ export class ToolRouter {
    */
   private computeRecommendationScore(uni: any, preferences: any, matchedDirectionNames: string[] = []): {
     total: number;
-    breakdown: { direction: number; budget: number; region: number; bonus: number; weakness: number };
+    breakdown: { direction: number; budget: number; region: number; bonus: number; weakness: number; quality: number };
     reasons: string[];
     nuances: string[];
   } {
@@ -2977,11 +3195,11 @@ export class ToolRouter {
     // institutionCategoryId ga aylanadi — eski kod faqat ID ("3"/"4"/"5") kutardi
     // va hech qachon mos kelmasdi (admissionFailed bonus/penalty umuman qo'llanilmasdi).
     // Endi ID ham, NOM ham tekshiriladi — har ikkala formatda ham ishlaydi.
-    const catName = (uni.institutionCategory || uni.institutionType || "").toLowerCase();
-    const catId = String(uni.institutionCategoryId ?? uni.institution_category_id ?? "");
-    const isPrivateUni = catId === "4" || /xususiy/.test(catName);
-    const isInternationalUni = catId === "5" || /xalqaro/.test(catName);
-    const isStateUni = catId === "3" || /davlat/.test(catName);
+    // STAGE 14g (reviewer fix): shared helper — searchDirection bilan bir xil logika.
+    const uniRank = universityCategoryRank(uni);
+    const isPrivateUni = uniRank === "private";
+    const isInternationalUni = uniRank === "international";
+    const isStateUni = uniRank === "state";
     const hasExplicitCategory = !!(preferences.institutionCategory || preferences.institutionCategories?.length);
     if (preferences.admissionFailed && !hasExplicitCategory) {
       // STAGE 14d (user qoidasi — KUCHLI signal): imtihondan yiqilgan user uchun
@@ -3038,11 +3256,27 @@ export class ToolRouter {
       }
     }
 
+    // STAGE 17 — UNIVERSITET SIFATI (0-15): "budget+private mos" yetarli emas —
+    // policy'ga TENG keladiganlar orasida REAL sifat (tajriba, talabalar soni,
+    // akkreditatsiya, hamkorlik, yo'nalish kengligi) hal qiluvchi bo'ladi.
+    // MUHIM (design): sifat TOTALGA QO'SHILMAYDI — aks holda yuqori balli
+    // kandidatlar 100 chegarasiga urilib, farqlanish yo'qoladi ("hammasi
+    // 100/100"). O'rniga: total = policy balli (o'zgarishsiz), sifat alohida
+    // breakdown field — rankingda TIE-BREAK sifatida ishlatiladi (total teng
+    // bo'lsa, sifat yuqoriroq bo'lgan yutadi). Shunda admissionFailed
+    // xususiy(+20)/davlat(-12) farqi hech qachon sifat bilan yuvilmaydi, lekin
+    // policy'ga teng kelgan ikkita xususiy univ orasida sifat qaror chiqaradi.
+    // Signal'lar faktga asoslangan, LLM emas backend to'playdi.
+    const quality = computeUniversityQuality(uni);
+    if (quality.score > 0) {
+      quality.signals.slice(0, 3).forEach((signal) => reasons.push(signal));
+    }
+
     const total = Math.max(0, Math.min(100, direction + budget + region + bonus + weakness));
 
     return {
       total,
-      breakdown: { direction, budget, region, bonus, weakness },
+      breakdown: { direction, budget, region, bonus, weakness, quality: quality.score },
       reasons,
       nuances,
     };

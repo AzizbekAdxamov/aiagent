@@ -6,7 +6,38 @@
  */
 import { lookupManager } from "@/data/lookups";
 
-export function formatRecommend(firstResult: any, message: string): string {
+/**
+ * STAGE 14g — VAZIYATGA MOS KIRISH: admissionFailed bo'lsa, clarification
+ * "Qaysi shahar?" bilan boshlansa ham avval vaziyatga murojaat qilinadi:
+ * "Siz imtihondan o'ta olmaganingizni aytdingiz. Avvalo xususiy va xalqaro
+ * universitetlarni ko'rib chiqamiz..." — davlat/xususiy so'ralmaydi (tool-router
+ * admissionFailedNoCategory bilan institutionCategory'ni missing ro'yxatidan
+ * chiqarib yuborgan).
+ */
+function admissionContextIntro(profile: Record<string, any> | null | undefined, message?: string): string | null {
+  // STAGE 15c (Response Quality): vaziyatga mos, qo'llab-quvvatlovchi kirish.
+  // "### 🎯 Keling, birga topamiz!" marketing shabloni emas — userning holatiga
+  // qarab tabiiy javob boshlanadi.
+  // 1) Imtihondan yiqilgan (admissionFailed) — xususiy/xalqaro yo'l ochiq.
+  if (profile?.admissionFailed) {
+    return "Tushunaman, bu yil davlat imtihonidan o'ta olmaganingiz universitetda o'qish rejangizni to'xtatishi kerak degani emas. Avvalo xususiy va xalqaro universitetlarni ko'rib chiqish mumkin — ularning qabuli ko'pincha suhbat yoki test asosida o'tadi. ";
+  }
+  // 2) Imtihondan o'tgan / o'qishni xohlayotgan (wantsToStudy) — tanlashga
+  // yordam berishga tayyormiz.
+  if (profile?.wantsToStudy) {
+    return "O'qishni davom ettirishni xohlaganingiz juda yaxshi — tanlashda sizga yordam berishga tayyorman. ";
+  }
+  // 3) Imtihondan O'TGAN, lekin qaysi yo'nalish/universitetni tanlashni
+  // bilmaydi ("davlat imtihonlaridan o'tdim, qaysi universitet tanlashni bilmay
+  // qoldim"). STAGE 15c: LLM provider limitda bo'lsa ham template fallback
+  // tabiiy bo'ladi — "Keling, birga topamiz!" marketing shabloni emas.
+  if (message && /\b(o'tdim|o'tganman|o'tkanman|utdim|utganman|o'tib\s+man)\b/i.test(message)) {
+    return "Imtihonlardan muvaffaqiyatli o'tganingiz bilan tabriklayman — bu katta yutuq! Endi eng muhimi, sizga mos universitet va yo'nalishni birgalikda tanlash. ";
+  }
+  return null;
+}
+
+export function formatRecommend(firstResult: any, message: string, profile?: Record<string, any> | null): string {
   const data = firstResult.data;
 
   // Review fix: hard filter natijasida yo'nalish bo'yicha HECH QANDAY universitet
@@ -50,20 +81,42 @@ export function formatRecommend(firstResult: any, message: string): string {
       return "### 🎯 Keling, sizga mos variantni birga topamiz!\n\nKeling, savolga javob bering, men sizga mos variantlarni topib beraman! 😊";
     }
 
-    // Navbat: qaysi ma'lumot birinchi so'raladi (preferences.known ichida
-    // allaqachon to'plangan ma'lumotlar ko'rsatilmaydi).
+    // STAGE 14g: admissionFailed bo'lsa vaziyatga mos kirish — "Davlatmi yoki
+    // xususiy?" hech qachon so'ralmaydi (private-first allaqachon qaror).
+    // Savol vaziyatni tan olib beriladi: "Siz imtihondan o'ta olmaganingizni
+    // aytdingiz — avvalo xususiy va xalqaro universitetlarni ko'rib chiqamiz.
+    // Qaysi shaharda o'qimoqchisiz?"
+    const intro = admissionContextIntro(profile, message);
     const first = missing[0];
-    let response = "### 🎯 Keling, sizga mos variantni birga topamiz!\n\n";
+    // STAGE 15c (Response Quality): vaziyatga mos intro BOR bo'lsa, marketing
+    // shabloni ("### 🎯 Keling, sizga mos variantni birga topamiz!") qo'shilmaydi
+    // — intro o'zi tabiiy boshlanish (user yiqilgan bo'lsa "tushunaman..." ruhida).
+    // Intro bo'lmasagina umumiy sarlavha ishlatiladi.
+    let response = intro
+      ? `${intro}\n`
+      : "### 🎯 Keling, sizga mos variantni birga topamiz!\n\n";
     if (first === 'region') {
       response += "1️⃣ **Qaysi shahar yoki viloyatda o'qimoqchisiz?** (Toshkent, Samarqand, Buxoro...)\n\n";
     } else if (first === 'directionCategory') {
       response += "2️⃣ **Qanday yo'nalish sizni qiziqtiradi?** (IT, tibbiyot, iqtisod, pedagogika, huquq...)\n\n";
       response += "Masalan: IT, tibbiyot, iqtisod, muhandislik, pedagogika, huquq...\n\n";
     } else if (first === 'institutionCategory') {
-      response += "3️⃣ **Davlatmi yoki xususiy universitetmi?**\n\n";
+      // MUHIM (STAGE 14g): admissionFailed bo'lsa bu savol hech qachon
+      // berilmaydi — private-first allaqachon qaror qilingan. Guard faqat
+      // xavfsizlik uchun (tool-router buni missing'ga qo'shmagan bo'lsa ham).
+      if (profile?.admissionFailed) {
+        response += "3️⃣ **Qaysi shaharda o'qimoqchisiz?**\n\n";
+      } else {
+        response += "3️⃣ **Davlatmi yoki xususiy universitetmi?**\n\n";
+      }
     }
 
-    response += "📌 **[Mentalaba.uz](https://mentalaba.uz/universities)** — barcha universitetlar\n\nJavob bering, men sizga mos variantlarni topib beraman! 😊";
+    // STAGE 15c (Response Quality): intro bor bo'lsa, "Javob bering, men sizga
+    // mos variantlarni topib beraman! 😊" marketing qatori qo'shilmaydi — intro
+    // o'zi tabiiy yakun beradi. Intro bo'lmasa (oddiy holat) eski usul qoladi.
+    response += intro
+      ? ""
+      : "📌 **[Mentalaba.uz](https://mentalaba.uz/universities)** — barcha universitetlar\n\nJavob bering, men sizga mos variantlarni topib beraman! 😊";
     return response;
   }
 
@@ -81,6 +134,12 @@ export function formatRecommend(firstResult: any, message: string): string {
       const typeNames: Record<string, string> = { '3': '🏛 Davlat', '4': '🏢 Xususiy', '5': '🌍 Xalqaro' };
       prefLines.push(typeNames[prefs.institutionCategory] || '');
     }
+    // MUHIM (Fix #42/#47/#60): user "Grant bo'lsa yaxshi" / "Yotoqxona kerak"
+    // degan bo'lsa, javobda shu preference'lar ham ko'rsatilishi kerak — aks
+    // holda javobda "grant"/"yotoqxona" so'zi umuman chiqmaydi (userning
+    // so'rovi e'tiborsiz qolgandek tuyuladi).
+    if (prefs.interestGrant) prefLines.push('💰 grant');
+    if (prefs.interestAccommodation) prefLines.push('🏠 yotoqxona');
 
     const starsFor = (score: number): string => {
       const stars = Math.round(score / 20); // 0-5 yulduz
@@ -88,9 +147,12 @@ export function formatRecommend(firstResult: any, message: string): string {
     };
     const buildWhyParts = (uni: any): string[] => {
       const whyParts: string[] = [];
-      // Backend hisoblagan score.reasons birinchi o'rinda (eng ishonchli)
+      // Backend hisoblagan score.reasons birinchi o'rinda (eng ishonchli).
+      // STAGE 17: 5 taga ko'tarildi — yo'nalish/hudud/byudjet/qabul sabablari
+      // bilan birga UNIVERSITET SIFATI sabablari (tajriba, talabalar soni,
+      // akkreditatsiya) ham "Nega mos keladi?" qatorida ko'rinishi uchun.
       if (uni.score?.reasons?.length > 0) {
-        whyParts.push(...uni.score.reasons.slice(0, 3));
+        whyParts.push(...uni.score.reasons.slice(0, 5));
       } else {
         if (prefs.directionCategory) whyParts.push(`📚 "${prefs.directionCategory}" yo'nalishi bor`);
         if (prefs.region && uni.location) {
@@ -114,8 +176,21 @@ export function formatRecommend(firstResult: any, message: string): string {
         const t = typeNames[cat];
         if (t && uniCat.includes(t.needle) && !alreadyHas(t.needle)) whyParts.push(t.label);
       }
-      if (uni.hasGrant && !alreadyHas('grant')) whyParts.push('💰 Grant imkoniyati bor');
-      if (uni.hasAccommodation && !alreadyHas('yotoqxona') && !alreadyHas('turar joy')) whyParts.push('🏠 Yotoqxonasi bor');
+      // Fix (#42/#47/#60): user grant/yotoqxona so'ragan bo'lsa, univda bor/
+      // yo'q bo'lishidan qat'i nazar javobda ko'rsatiladi ("❌ Grant mavjud
+      // emas" ham — userning so'rovi e'tiborga olingani ko'rinadi).
+      if (prefs.interestGrant) {
+        if (uni.hasGrant) whyParts.push('💰 Grant imkoniyati bor');
+        else if (!alreadyHas('grant')) whyParts.push('❌ Grant mavjud emas');
+      } else if (uni.hasGrant && !alreadyHas('grant')) {
+        whyParts.push('💰 Grant imkoniyati bor');
+      }
+      if (prefs.interestAccommodation) {
+        if (uni.hasAccommodation) whyParts.push('🏠 Yotoqxonasi bor');
+        else if (!alreadyHas('yotoqxona') && !alreadyHas('turar joy')) whyParts.push('❌ Yotoqxonasi yo\'q');
+      } else if (uni.hasAccommodation && !alreadyHas('yotoqxona') && !alreadyHas('turar joy')) {
+        whyParts.push('🏠 Yotoqxonasi bor');
+      }
       return whyParts;
     };
 
