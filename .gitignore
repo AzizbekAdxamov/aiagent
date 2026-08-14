@@ -43,6 +43,13 @@ UsersatxamOneDriveDesktopmentalba_agentswagger.json
 # lekin namuna fayl gitga tushishi mumkin (secret yo'q)
 !.env.example
 
+# stress/hisobot va scratch fayllar (ishchi fayllar — git tarixida kerak emas)
+scripts/*.md
+scripts/_run-*.sh
+scripts/fix-groups.mjs
+scripts/merge-final-clean.mjs
+scripts/merge-stage14g.mjs
+
 # vercel
 .vercel
 

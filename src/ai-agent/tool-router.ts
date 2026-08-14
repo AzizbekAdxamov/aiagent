@@ -2358,37 +2358,124 @@ export class ToolRouter {
     }
   }
 
+  /**
+   * QABUL (admission) — "qabul qachon?", "kirish ballari necha?", "qabul ochiqmi?"
+   *
+   * BOSQICH 20 (entity resolution, user qoidasi): "Topilmagan entity'ni hech
+   * qachon model o'zi o'ylab topmasin".
+   *  - University entity YO'Q bo'lsa: API'dan BIRINCHI 10 ta universitеtni olib
+   *    LLM'ga taxmin qildirmaymiz (ilgari "TMC qabul qachon?" → birinchi univ
+   *    TMA javob berardi — xato!). Umumiy qabul savollari ("qabul qachon
+   *    boshlanadi") template orqali xavfsiz javoblanadi → bo'sh natija.
+   *  - University bor, lekin bazada TOPILMASA: LLM o'z bilimidan javob
+   *    yozmasligi uchun notFound marker bilan qaytaramiz → formatter aniqlik
+   *    so'raydi ("«TMC» nomidagi universitеt topilmadi — to'liq nomini yozing").
+   *  - Aniq abbr/name match deterministik (canonical alias lookup) — LLM EMAS.
+   */
   private async getAdmissionInfo(intent: IntentResult, sessionContext?: any): Promise<ToolResult> {
     const { university } = intent.entities;
 
     try {
-      const result = await externalApi.getUniversitiesFilter({
-        search: university || undefined,
-        limit: 10,
-      });
+      // University yo'q (va context'da ham yo'q) — umumiy qabul savoli, taxmin qilmaymiz
+      if (!university) {
+        console.log(`[Admission] University entity yo'q — bo'sh natija (taxmin qilinmaydi): "${(intent as any).effectiveMessage || ''}"`);
+        return { tool: "get_university" as any, success: true, data: [] };
+      }
 
-      let universities = Array.isArray(result?.data) ? result.data : Array.isArray(result) ? result : [];
+      const filterResult = await externalApi.getUniversitiesFilter({ limit: 200 });
+      let universities: any[] = [];
+      if (Array.isArray(filterResult?.data)) universities = filterResult.data;
+      else if (Array.isArray(filterResult)) universities = filterResult;
       // MUHIM (Fix: turizm): texnikum/kollej/litsey OTM emas — chiqarib tashlanadi
       universities = universities.filter((u: any) => this.isUniversityLike(u));
 
+      const matched = this.resolveUniversityByName(university, universities);
+
+      // Bazada topilmadi — LLM taxmin qilmasin, aniqlik so'raladi
+      if (!matched) {
+        console.log(`[Admission] "${university}" bazada topilmadi — aniqlik so'raladi`);
+        return {
+          tool: "get_university" as any,
+          success: true,
+          data: [{ name: university, notFound: true }],
+        };
+      }
+
+      // Qabul maydonlari (isOpen/startDate/deadline/phone) FILTER listida yo'q —
+      // faqat user-side/{id} da bor. Aniq javob uchun user-side'dan to'ldiramiz.
+      let detail = matched;
+      try {
+        const full = await Promise.race([
+          externalApi.getUniversityUserSide(matched.id),
+          new Promise((_, rej) => setTimeout(() => rej(new Error("timeout")), 5000)),
+        ]);
+        if (full && full.id) detail = full;
+      } catch {
+        /* user-side ishlamasa filter ma'lumoti ishlatiladi */
+      }
+
       // BOSQICH 11: qabul ma'lumoti ko'rilgan universitеtni ham eslab qolamiz
-      if (universities.length > 0) this.rememberUniversity(sessionContext, universities[0]);
+      this.rememberUniversity(sessionContext, matched);
 
       return {
         tool: "get_university" as any,
         success: true,
-        data: universities.map((u: any) => ({
-          name: u.full_name_uz || u.fullNameUz,
-          isOpen: u.is_open_for_admission ?? u.isOpenForAdmission,
-          startDate: u.admission_start_date || u.admissionStartDate,
-          deadline: u.admission_deadline || u.admissionDeadline,
-          quota: u.current_quota ?? u.currentQuota,
-          phone: u.admission_phone || u.admissionPhone,
-        })),
+        data: [{
+          name: matched.full_name_uz || matched.fullNameUz || university,
+          slug: matched.slug || "",
+          isOpen: detail.is_open_for_admission ?? detail.isOpenForAdmission,
+          startDate: detail.admission_start_date || detail.admissionStartDate,
+          deadline: detail.admission_deadline || detail.admissionDeadline,
+          quota: detail.current_quota ?? detail.currentQuota,
+          phone: detail.admission_phone || detail.admissionPhone,
+        }],
       };
     } catch (error) {
       return this.errorResult("get_university", "Qabul ma'lumotlarini olishda xatolik", error);
     }
+  }
+
+  /**
+   * BOSQICH 20 (entity resolution): universitеt nomini DETERMINISTIK hal qilish.
+   * Canonical alias lookup — LLM EMAS:
+   *   1) Aniq abbreviatura tengligi (abbrNameUz/En === target) — TATU → axborot
+   *      texnologiyalari (Arxitektura-Qurilish bilan adashtirilmaydi)
+   *   2) To'liq nom/slug ichida substring
+   *   3) Kalit so'z matching (2+ muhim so'z)
+   */
+  private resolveUniversityByName(target: string, universities: any[]): any | null {
+    const t = (target || "").toLowerCase().trim();
+    if (!t || universities.length === 0) return null;
+
+    // 1) Aniq abbreviatura (TATU → abbrNameUz="TATU") — eng ishonchli alias
+    const exact = universities.find((u: any) =>
+      [u.abbr_name_uz, u.abbrNameUz, u.abbr_name_en, u.abbrNameEn]
+        .some((a: any) => typeof a === "string" && a.toLowerCase() === t)
+    );
+    if (exact) return exact;
+
+    // 2) To'liq nom / slug ichida substring
+    const byName = universities.find((u: any) =>
+      [u.full_name_uz, u.fullNameUz, u.full_name_ru, u.fullNameRu, u.full_name_en, u.fullNameEn, u.slug]
+        .some((n: any) => typeof n === "string" && n.toLowerCase().includes(t))
+    );
+    if (byName) return byName;
+
+    // 3) Kalit so'z matching (kamida 2 muhim so'z yoki 60%)
+    const words = t.replace(/[^a-z0-9'\s-]/gi, " ").split(/\s+/).filter((w: string) => w.length > 2);
+    if (words.length > 0) {
+      const byWords = universities.find((u: any) => {
+        const names = [
+          u.full_name_uz, u.fullNameUz, u.full_name_ru, u.fullNameRu,
+          u.full_name_en, u.fullNameEn, u.abbr_name_uz, u.abbrNameUz,
+        ].filter(Boolean).join(" ").toLowerCase();
+        const matched = words.filter((w: string) => names.includes(w));
+        return matched.length >= Math.max(2, Math.ceil(words.length * 0.6));
+      });
+      if (byWords) return byWords;
+    }
+
+    return null;
   }
 
   private async getTransferInfo(intent: IntentResult): Promise<ToolResult> {

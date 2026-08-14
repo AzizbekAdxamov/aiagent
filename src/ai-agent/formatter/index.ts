@@ -26,7 +26,7 @@ import {
   appendLowConfidenceClarification,
   generalChatResponse,
 } from "./common";
-import { formatUniversitySearch, universityNotFoundResponse } from "./university";
+import { formatUniversitySearch, formatAdmissionInfo, universityNotFoundResponse } from "./university";
 import { formatDirectionSearch, formatDirectionDetail, formatDirectionList, directionNotFoundResponse, directionListNotFoundResponse } from "./direction";
 import { formatTuitionSearch, tuitionNotFoundResponse } from "./tuition";
 import { formatGrantsSearch, grantsNotFoundResponse } from "./grant";
@@ -82,6 +82,10 @@ export class ResponseBuilder {
         switch (firstResult.tool) {
           case "search_university":
             content = formatUniversitySearch(firstResult, message);
+            break;
+          case "get_university":
+            // BOSQICH 20: qabul ma'lumoti — FAQAT real API faktlari, LLM to'qimaydi
+            content = formatAdmissionInfo(firstResult, message);
             break;
           case "search_direction":
             // QUERY RESOLVER (BOSQICH 14): direction_detail rejimida yo'nalishning

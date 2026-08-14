@@ -338,6 +338,33 @@ When the user asks to COMPARE universities or categories (e.g. "Davlatmi yoki xu
           break;
         }
 
+        case "get_university": {
+          // BOSQICH 20 (entity resolution): qabul ma'lumoti — FAQAT REAL API
+          // faktlari LLM'ga beriladi va LLM'ga to'qish TAQIQLANADI.
+          const data = Array.isArray(result.data) ? result.data : [result.data];
+          parts.push("=== ADMISSION DATA (REAL from API — do NOT invent anything else) ===");
+          for (const uni of data) {
+            if (uni.notFound) {
+              parts.push(`University "${uni.name}" was NOT FOUND in the database.`);
+              parts.push("INSTRUCTION: Tell the user this university was not found and ask for the full name — do NOT guess which university they meant.");
+              continue;
+            }
+            parts.push(`University: ${uni.name}`);
+            if (uni.slug) parts.push(`Slug: ${uni.slug}`);
+            if (uni.isOpen !== undefined) parts.push(`Admission: ${uni.isOpen ? "✅ Open" : "❌ Closed"}`);
+            if (uni.startDate) parts.push(`Admission Start: ${uni.startDate}`);
+            if (uni.deadline) parts.push(`Admission Deadline: ${uni.deadline}`);
+            if (uni.phone) parts.push(`Admission Phone: ${uni.phone}`);
+            if (uni.quota) parts.push(`Quota: ${uni.quota}`);
+          }
+          parts.push("");
+          parts.push("INSTRUCTION: Answer ONLY with the admission facts listed above.");
+          parts.push("Do NOT invent passing scores (kirish ballari), exam subjects, or exact dates that are not listed above.");
+          parts.push("If the user asks about data not present above (e.g. passing scores), honestly say the database does not have it yet and link to https://mentalaba.uz/universities");
+          parts.push("");
+          break;
+        }
+
         case "compare_universities": {
           const data = Array.isArray(result.data) ? result.data : [result.data];
           parts.push("=== COMPARISON DATA (for displaying as comparison table) ===");

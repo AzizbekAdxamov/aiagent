@@ -238,6 +238,62 @@ export function universityNotFoundResponse(): string {
 }
 
 /**
+ * QABUL (admission) — get_university tool natijasini formatlash.
+ *
+ * BOSQICH 20 (entity resolution): FAQAT REAL API ma'lumotlari ko'rsatiladi —
+ * LLM o'z bilimidan kirish ballari/imtihon fanlari/sanalar TO'QIMAYDI.
+ *   - notFound=true → universitеt bazada yo'q → aniqlik so'raladi
+ *   - qabul maydonlari yo'q → "bazada yo'q" + katalog havolasi
+ *   - kirish ballari so'ralsa → DB'da yo'q, katalogga yo'naltiramiz
+ */
+export function formatAdmissionInfo(firstResult: any, message: string): string | null {
+  const data = Array.isArray(firstResult.data) ? firstResult.data : [];
+  if (data.length === 0) return null;
+  const uni = data[0];
+  const name = uni.name || uni.fullNameUz || "Universitet";
+  const slug = uni.slug || "";
+
+  // Universitеt bazada topilmadi — taxmin qilmaymiz, aniqlik so'raymiz
+  if (uni.notFound) {
+    return `Kechirasiz, **«${name}»** nomidagi universitеt hozircha bazada topilmadi. 😔\n\nIltimos, universitеtning to'liq nomini yozing (masalan: "PDP University", "Toshkent tibbiyot akademiyasi").\n\n📌 **[Mentalaba.uz](https://mentalaba.uz/universities)** — barcha universitetlar katalogi`;
+  }
+
+  const hasAny = uni.isOpen !== undefined || uni.startDate || uni.deadline || uni.phone;
+  if (!hasAny) {
+    return `Kechirasiz, **${name}** uchun qabul ma'lumoti hozircha bazada yo'q. 😔\n\n📌 **[Mentalaba.uz da batafsil](https://mentalaba.uz/universities/${slug})** — qabul holati va boshqa ma'lumotlar`;
+  }
+
+  // ISO sana ("2026-06-01T00:00:00.000Z") → o'qiladigan format ("2026-yil 1-iyun")
+  const formatDate = (v: any): string => {
+    if (!v) return "";
+    const s = String(v);
+    const m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (!m) return s;
+    const months = ["yanvar", "fevral", "mart", "aprel", "may", "iyun", "iyul", "avgust", "sentabr", "oktabr", "noyabr", "dekabr"];
+    const month = months[parseInt(m[2], 10) - 1] || m[2];
+    return `${m[1]}-yil ${parseInt(m[3], 10)}-${month}`;
+  };
+
+  let resp = `### 🎓 ${name} qabul holati\n`;
+  if (uni.isOpen !== undefined) resp += `${uni.isOpen ? "✅ **Qabul:** Ochiq" : "❌ **Qabul:** Yopiq"}\n`;
+  const start = formatDate(uni.startDate);
+  const deadline = formatDate(uni.deadline);
+  if (start) resp += `📅 **Boshlanishi:** ${start}\n`;
+  if (deadline) resp += `⏰ **Oxirgi muddat:** ${deadline}\n`;
+  if (uni.phone) resp += `📞 **Qabul telefoni:** ${uni.phone}\n`;
+
+  // Kirish ballari so'ralsa — DB'da bunday ma'lumot yo'q (LLM to'qimasin!)
+  if (/\b(kirish|o'tish|o'tish)\w*\s*(ball|ballari|bali|score)|ball\w*\s*(necha|qancha|bormi)\b/i.test(message)) {
+    resp += `\n📊 **Kirish ballari:** bu ma'lumot hozircha bazada yo'q. Aniq ballarni bilish uchun: ${slug ? `[Mentalaba.uz](https://mentalaba.uz/universities/${slug})` : "[Mentalaba.uz](https://mentalaba.uz/universities)"} katalogini ko'ring.\n`;
+  } else if (slug) {
+    resp += `\n📌 **[Mentalaba.uz da batafsil](https://mentalaba.uz/universities/${slug})** — to'liq ma'lumot\n`;
+  }
+
+  resp += `\nYana qanday yordam kerak? 😊`;
+  return resp;
+}
+
+/**
  * RESPONSE COMPOSER (BOSQICH 12): bitta universitеt + ANIQ FIELD so'ralganda
  * faqat o'sha maydonni chiqaradi. "PDP telefoni?" → telefon, "uning narxlari
  * qancha?" → kontrakt narxi. To'liq karta emas — aynan so'ralgan ma'lumot.

@@ -274,7 +274,7 @@
     "tool": "get_university",
     "handler": "get_admission",
     "priority": 0.8,
-    "dataIntent": false,
+    "dataIntent": true,
     "selfComplete": true,
     "patterns": [
       "(qabul|admission|acceptance|hujjat|ro'yxatdan\\s+o'tish)",

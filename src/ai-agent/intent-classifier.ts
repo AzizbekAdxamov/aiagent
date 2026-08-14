@@ -694,7 +694,7 @@ export class IntentClassifier {
       // "TATUning", "PDPga" — real foydalanuvchi suffix'li yozadi. \b faqat
       // so'z chegarasini tekshiradi, suffix esa qo'shimcha guruhda — match[1]
       // har doim sof qisqartma bo'lib qoladi ("PDPda" → match[1]="PDP").
-      /\b(PDP|INHA|WIUT|TATU|TUIT|EMU|SamDU|ADU|MIS|MESI|TKXU|TKTU|TDTU|TDIU|TDYU|TTA|TTPI|TATI|SamSI|BuxDU|FarDU|NamDU|UrDU|QarDU|AndDU|TerDU|NavDPI|JDPU|TDPU|ToshDTU|ToshKEU|TMI|TQI|ToshFA|ToshSEI|TAFU|amity|westminster|inh[oa]|akfa\s*med(?:line)?)(?:ni|ning|ga|da|dan|dagi|sini|sining|dagi|lar|larining|larida|laridan|lariga)?\b/i,
+      /\b(PDP|INHA|WIUT|TATU|TUIT|EMU|TMC|TMCI|SamDU|ADU|MIS|MESI|TKXU|TKTU|TDTU|TDIU|TDYU|TTA|TTPI|TATI|SamSI|BuxDU|FarDU|NamDU|UrDU|QarDU|AndDU|TerDU|NavDPI|JDPU|TDPU|ToshDTU|ToshKEU|TMI|TQI|ToshFA|ToshSEI|TAFU|amity|westminster|inh[oa]|akfa\s*med(?:line)?)(?:ni|ning|ga|da|dan|dagi|sini|sining|dagi|lar|larining|larida|laridan|lariga)?\b/i,
     ];
 
     for (const pattern of uniPatterns) {
