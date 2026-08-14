@@ -646,7 +646,7 @@ export function augmentFollowUp(
     // shakllarga mos kelmaydi (\b "EMUni" da EMU dan keyin bo'lmaydi).
     // Real foydalanuvchi aynan shunday yozadi: "Yo'q, men EMUni aytgandim".
     const repairShort = userMessage.match(
-      /\b(EMU|TATU|TMC|TMCI|PDP|INHA|WIUT|TUIT|TTA|TTPI|TATI|TMI|TQI|SamDU|ADU|BuxDU|FarDU|NamDU|UrDU|QarDU|AndDU|TerDU|JDPU|TDPU|ToshDTU|ToshKEU|TKXU|TKTU|TDTU|TDIU|TDYU|ToshFA|ToshSEI|MIS|MESI|amity|westminster|akfa\s*med(?:line)?)(?:ni|ning|ga|da|dan|sini|sining)?\b/i
+      /\b(EMU|TATU|TMC|TMCI|PDP|INHA|WIUT|TUIT|TTA|TTPI|TATI|TMI|TQI|SamDU|ADU|BuxDU|FarDU|NamDU|UrDU|QarDU|AndDU|TerDU|JDPU|TDPU|ToshDTU|ToshKEU|TKXU|TKTU|TDTU|TDIU|TDYU|ToshFA|ToshSEI|MIS|MESI|TAQI|TASI|MDIS|amity|westminster|akfa\s*med(?:line)?)(?:ni|ning|ga|da|dan|sini|sining)?\b/i
     );
     // REVIEWER FIX: to'liq nom regex'i xavfli — "Yo'q, Toshkentdagi davlat
     // universiteti kerak" (yangi so'rov) yoki "Yo'q, men Toshkent tibbiyot

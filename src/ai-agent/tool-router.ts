@@ -10,6 +10,7 @@ import { normalizeUserText } from "./text-normalizer";
 import { computeRecommendationDecision } from "./decision-engine";
 import { validateRecommendationResults } from "./result-validator";
 import { computeUniversityQuality } from "./university-quality";
+import { resolveAliasedUniversity, UNIVERSITY_ALIASES } from "./university-aliases";
 import { REGION_NAME_TO_ID } from "./llm-entity-extractor";
 
 /**
@@ -874,8 +875,15 @@ export class ToolRouter {
         universitiesList = mentionedUniversities;
       }
 
-      // Agar aniq universitet nomi berilgan bo'lsa, nomi bo'yicha filtrlaymiz
-      if (university && mentionedUniversities.length <= 1) {
+      // CANONICAL ALIAS (BOSQICH 20): "TUIT haqida" → TATU. DB'da abbr sifatida
+      // yo'q bo'lgan user-qisqartmalari (TUIT, INHA, TTA, TAQI...) shu yerda
+      // canonical slug orqali yopiladi — aks holda "universitet topilmadi" chiqadi.
+      const aliasedUni = resolveAliasedUniversity(university, universitiesList);
+      if (aliasedUni && mentionedUniversities.length <= 1) {
+        console.log(`[UniversityAlias] "${university}" → ${aliasedUni.full_name_uz || aliasedUni.fullNameUz} (canonical alias)`);
+        universitiesList = [aliasedUni];
+      } else if (university && mentionedUniversities.length <= 1) {
+        // Agar aniq universitet nomi berilgan bo'lsa, nomi bo'yicha filtrlaymiz
         const searchTerm = university.toLowerCase();
         universitiesList = universitiesList.filter((u: any) =>
           (u.full_name_uz || '').toLowerCase().includes(searchTerm) ||
@@ -2446,6 +2454,14 @@ export class ToolRouter {
   private resolveUniversityByName(target: string, universities: any[]): any | null {
     const t = (target || "").toLowerCase().trim();
     if (!t || universities.length === 0) return null;
+
+    // 0) CANONICAL ALIAS (BOSQICH 20): "TUIT"→TATU, "INHA"→IUT, "TAQI"→TAQU
+    //    DB'da abbr sifatida yo'q bo'lgan user-qisqartmalarini yopadi.
+    const aliased = resolveAliasedUniversity(target, universities);
+    if (aliased) {
+      console.log(`[UniversityAlias] "${target}" → slug=${UNIVERSITY_ALIASES[String(target).toUpperCase().trim()]} (canonical alias)`);
+      return aliased;
+    }
 
     // 1) Aniq abbreviatura (TATU → abbrNameUz="TATU") — eng ishonchli alias
     const exact = universities.find((u: any) =>
