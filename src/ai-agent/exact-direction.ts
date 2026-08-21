@@ -165,13 +165,19 @@ export function detectExactDirection(message: string): string | null {
 
   const normalized = normalizeDirectionName(message);
 
-  // Avval eng uzun aniq nomni qidirib topamiz (substring bilan)
+  // Avval eng uzun aniq nomni qidirib topamiz (so'z chegarasi bilan)
+  // MUHIM (fix): oddiy `.includes()` substring tekshiruvi so'z chegarasini
+  // hisobga olmasdi — qisqa nomlar ("sport", "audit") boshqa so'zlar ichida
+  // ham topilib qolardi ("transport" → "sport", "auditoriya" → "audit").
+  // Endi \b...\b bilan faqat mustaqil so'z/ibora sifatida uchrasa mos keladi.
   let bestMatch: string | null = null;
   let bestLength = 0;
   for (const name of EXACT_DIRECTION_NAMES) {
     const norm = normalizeDirectionName(name);
     if (norm.length <= 2) continue;
-    if (normalized.includes(norm)) {
+    const escaped = norm.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const boundaryRegex = new RegExp(`\\b${escaped}\\b`);
+    if (boundaryRegex.test(normalized)) {
       if (norm.length > bestLength) {
         bestMatch = name;
         bestLength = norm.length;

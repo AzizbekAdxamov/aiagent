@@ -961,7 +961,10 @@ class ProviderManager {
       }
 
       // Try Gemini next (free, backup)
-      if (this.geminiModel) {
+      // MUHIM (fix): boshqa provider'lar kabi shouldSkipProvider/openCircuit
+      // bilan qo'riqlanadi — aks holda Gemini kvotasi tugaganda HAR bir
+      // so'rovda muvaffaqiyatsiz urinish qo'shimcha latency qo'shar edi.
+      if (this.geminiModel && !this.shouldSkipProvider("gemini")) {
         try {
           console.log(`[DEBUG] Trying Gemini...`);
           const result = await this.callGemini(systemPrompt, context, conversationHistory, userMessage);
@@ -975,11 +978,12 @@ class ProviderManager {
         } catch (error: any) {
           errors.push(`Gemini: ${error.message}`);
           console.error("[Gemini Error]", error);
+          if (this.isLimitError(error)) this.openCircuit("gemini", this.getRetryAfterMs(error));
         }
       }
 
       // Try OpenAI last
-      if (this.openaiClient) {
+      if (this.openaiClient && !this.shouldSkipProvider("openai")) {
         try {
           console.log(`[DEBUG] Trying OpenAI...`);
           const result = await this.callOpenAI(systemPrompt, context, conversationHistory, userMessage);
@@ -993,6 +997,7 @@ class ProviderManager {
         } catch (error: any) {
           errors.push(`OpenAI: ${error.message}`);
           console.error("[OpenAI Error]", error);
+          if (this.isLimitError(error)) this.openCircuit("openai", this.getRetryAfterMs(error));
         }
       }
 
@@ -1217,7 +1222,7 @@ class ProviderManager {
     }
 
     // Gemini backup
-    if (this.geminiModel) {
+    if (this.geminiModel && !this.shouldSkipProvider("gemini")) {
       try {
         console.log(`[Hybrid] Trying Gemini`);
         const result = await this.callGemini(systemPrompt, contextForLlm, conversationHistory, userMessage);
@@ -1231,11 +1236,12 @@ class ProviderManager {
       } catch (error: any) {
         errors.push(`Gemini: ${error.message}`);
         console.error("[Hybrid Gemini Error]", error);
+        if (this.isLimitError(error)) this.openCircuit("gemini", this.getRetryAfterMs(error));
       }
     }
 
     // OpenAI oxirgi
-    if (this.openaiClient) {
+    if (this.openaiClient && !this.shouldSkipProvider("openai")) {
       try {
         console.log(`[Hybrid] Trying OpenAI`);
         const result = await this.callOpenAI(systemPrompt, contextForLlm, conversationHistory, userMessage);
@@ -1249,6 +1255,7 @@ class ProviderManager {
       } catch (error: any) {
         errors.push(`OpenAI: ${error.message}`);
         console.error("[Hybrid OpenAI Error]", error);
+        if (this.isLimitError(error)) this.openCircuit("openai", this.getRetryAfterMs(error));
       }
     }
 

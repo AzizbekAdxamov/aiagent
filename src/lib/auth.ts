@@ -156,8 +156,17 @@ export async function getAuthUser(request: Request): Promise<AuthUser | null> {
     // yangi token oladi — DB'dagi eskidan farq qiladi. Shuning uchun hard-
     // reject EMAS: mismatch bo'lsa API orqali validatsiya qilinadi. API token'ni
     // tasdiqlasa — DB yangilanadi va qabul qilinadi. API rad etsa — soxta token.
-    const isKnownToken = !isExpired && existing.accessToken && existing.accessToken === token;
-    if (!isKnownToken && !isExpired) {
+    // MUHIM (security fix): isKnownToken exp'dan QAT'IY NAZAR tekshiriladi —
+    // aks holda soxta (signature'siz) JWT'ni "id":victimId va o'tgan "exp"
+    // bilan yuborib, validatsiyani butunlay chetlab o'tib, pastdagi refresh
+    // blokida victim'ning DB'dagi refreshToken'i bilan yangi access token
+    // olish mumkin edi (account takeover). Endi: token DB'dagidan farq qilsa
+    // (yangi qurilma YOKI soxta token) — API orqali tasdiqlanishi SHART,
+    // muddati o'tgan bo'lsa ham (API baribir 401 qaytaradi — soxta token rad
+    // etiladi; haqiqiy eskirgan token esa DB bilan mos kelgani uchun bu
+    // branch'ga umuman kirmaydi).
+    const isKnownToken = !!existing.accessToken && existing.accessToken === token;
+    if (!isKnownToken) {
       const profile = await validateTokenWithApi(token);
       if (!profile) {
         console.warn(`[Auth] User ${userId} tokeni validatsiyadan o'tmadi — soxta/eskirgan token`);

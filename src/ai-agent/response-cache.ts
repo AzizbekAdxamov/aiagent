@@ -34,8 +34,11 @@ class ResponseCache {
     const norm = effectiveMessage
       .toLowerCase()
       .replace(/\s+/g, " ")
-      .trim()
-      .slice(0, 200);
+      .trim();
+    // MUHIM (fix): oldin faqat birinchi 200 belgi olinardi — uzun (follow-up
+    // kontekst bilan boyitilgan) xabarlar bir xil prefiksga ega bo'lib
+    // qolganda turli so'rovlar bir-birining cache javobini olib qo'yardi.
+    // Endi to'liq normalizatsiya qilingan matn ishlatiladi — kollizyo yo'q.
     return `${intent}|${norm}|${language}`;
   }
 

@@ -2137,13 +2137,17 @@ export class ToolRouter {
           if (!this.matchesAdvancedFilters(uni, intent.entities)) continue;
 
           const u = this.normalizeUniversity(uni);
-          if (u.minimalTuitionFee || u.maximalTuitionFee) {
+          // MUHIM (fix): minimalTuitionFee === 0 (bepul/davlat granti) haqiqiy
+          // qiymat — `||` bilan tekshirilsa falsy bo'lib "narx yo'q" deb
+          // chiqarib tashlanardi. `!= null` orqali faqat chindan yo'q
+          // (undefined/null) holatlar filtrlanadi.
+          if (u.minimalTuitionFee != null || u.maximalTuitionFee != null) {
             withTuition.push({
               name: u.fullNameUz || u.fullNameEn,
               slug: u.slug,
               tuition: u.tuition,
-              min: u.minimalTuitionFee || 0,
-              max: u.maximalTuitionFee || 0,
+              min: u.minimalTuitionFee ?? u.maximalTuitionFee ?? 0,
+              max: u.maximalTuitionFee ?? u.minimalTuitionFee ?? 0,
               location: u.location || '',
               type: u.institutionCategory || '',
             });
@@ -2162,9 +2166,9 @@ export class ToolRouter {
       // (13 mln) oldin ko'rinib qoladi. Follow-up'da foydalanuvchi O'SHA
       // universitеtni so'rayapti, eng arzonini emas!
       if (!isFollowUpTuition) {
-        withTuition.sort((a, b) => (a.min > 0 ? a.min : a.max) - (b.min > 0 ? b.min : b.max));
+        withTuition.sort((a, b) => a.min - b.min);
       }
-      const minTuition = Math.min(...withTuition.map((u) => (u.min > 0 ? u.min : u.max)));
+      const minTuition = Math.min(...withTuition.map((u) => u.min));
       const maxTuition = Math.max(...withTuition.map((u) => u.max));
 
       return {
@@ -3273,7 +3277,13 @@ export class ToolRouter {
     // 3. Byudjet mosligi (20 bal)
     const minFee = uni.minimalTuitionFee ?? uni.minimal_tuition_fee;
     const maxFee = uni.maximalTuitionFee ?? uni.maximal_tuition_fee;
-    const midFee = minFee && maxFee ? (minFee + maxFee) / 2 : (minFee || maxFee);
+    // MUHIM (fix): minFee === 0 (bepul/davlat granti) haqiqiy qiymat —
+    // `&&`/`||` bilan falsy deb tashlab yuborilsa, o'rtacha narx noto'g'ri
+    // (2 baravar qimmat) hisoblanardi.
+    const midFee =
+      minFee != null && maxFee != null
+        ? (minFee + maxFee) / 2
+        : minFee ?? maxFee;
 
     if (preferences.tuitionMax !== undefined && midFee !== undefined) {
       if (midFee <= preferences.tuitionMax) {

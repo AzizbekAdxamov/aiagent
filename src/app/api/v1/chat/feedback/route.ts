@@ -21,13 +21,24 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // MUHIM (security fix): userId ham, guestId ham bo'lmasa filter
+    // `undefined` bo'lib, Prisma buni "cheklovsiz" deb tushunardi — har kim
+    // boshqa foydalanuvchining session'iga feedback qoldira olardi. Endi
+    // ikkalasi ham yo'q bo'lsa so'rov butunlay rad etiladi (fail-closed).
+    if (!userId && !guestId) {
+      return NextResponse.json(
+        { success: false, error: "Unauthorized" },
+        { status: 401 }
+      );
+    }
+
     const message = await prisma.chatMessage.findFirst({
       where: {
         id: messageId,
         sessionId,
         role: "assistant",
         // User/guest faqat O'Z session'iga feedback bera oladi
-        session: userId ? { userId } : guestId ? { guestId } : undefined,
+        session: userId ? { userId } : { guestId: guestId as string },
       },
       select: { id: true },
     });

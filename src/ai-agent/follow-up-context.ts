@@ -530,7 +530,10 @@ export function extractTopicName(
  * ularni so'ramagan. Saqlanadi: university + accommodation (userning asl
  * savolidan: "yotoqxonasi bormi?" → accommodation=true).
  */
-function sanitizeResolvedUniversityEntities(entities: IntentResult["entities"]): IntentResult["entities"] {
+function sanitizeResolvedUniversityEntities(
+  entities: IntentResult["entities"],
+  originalEntities?: IntentResult["entities"]
+): IntentResult["entities"] {
   if (!entities) return entities;
   const {
     direction,
@@ -546,7 +549,24 @@ function sanitizeResolvedUniversityEntities(entities: IntentResult["entities"]):
   // EMAS, userning o'z xabaridan keladi ("kontrakti 20 mln gachami?").
   // University nomlarida pul miqdori deyarli uchramaydi, budget filter esa
   // qimmatli — o'chirish xato bo'lardi.
-  return rest;
+  //
+  // MUHIM (fix): oldin bu maydonlar SO'ZSIZ o'chirilardi — hatto userning
+  // o'z xabaridan (universitet nomi qo'shilishidan OLDIN) keladigan bo'lsa
+  // ham ("TATU → IT yo'nalishlari bormi?" dagi "IT" direction'i shu tarzda
+  // yo'qolib qolardi). Endi originalEntities (universitet nomi qo'shilishidan
+  // oldingi klassifikatsiya) berilgan bo'lsa, o'sha yerda ham bor bo'lgan
+  // maydonlar user tomonidan yozilgan hisoblanib SAQLANADI.
+  const result: IntentResult["entities"] = { ...rest };
+  if (originalEntities) {
+    if (direction !== undefined && originalEntities.direction !== undefined) result.direction = direction;
+    if (institutionCategory !== undefined && originalEntities.institutionCategory !== undefined) result.institutionCategory = institutionCategory;
+    if (institutionCategories !== undefined && originalEntities.institutionCategories !== undefined) result.institutionCategories = institutionCategories;
+    if (region !== undefined && originalEntities.region !== undefined) result.region = region;
+    if (degree !== undefined && originalEntities.degree !== undefined) result.degree = degree;
+    if (language !== undefined && originalEntities.language !== undefined) result.language = language;
+    if (educationType !== undefined && originalEntities.educationType !== undefined) result.educationType = educationType;
+  }
+  return result;
 }
 
 /**
@@ -1003,12 +1023,17 @@ export function augmentFollowUp(
   if (isMemoryFollowUp) {
     const uniName = lastUniSource.name;
     if (uniName) {
+      // Universitet nomi qo'shilishidan OLDINGI (userning o'z xabaridan
+      // olingan) entity'lar — quyida sanitizatsiyada saqlab qolinadi.
+      const originalEntitiesBeforeAugment = intent.entities;
       effectiveMessage = `${uniName} ${effectiveMessage}`;
       intent = intentClassifier.classify(effectiveMessage);
       // Fix 19: memory'dan qo'shilgan university nomi qayta klassifikatsiyada
       // spurious entity'lar chiqarishi mumkin ("Xalqaro Nordik universiteti"
-      // → institutionCategory=5). University aniq bo'lsa ular keraksiz.
-      intent = { ...intent, entities: sanitizeResolvedUniversityEntities(intent.entities) };
+      // → institutionCategory=5). University aniq bo'lsa ular keraksiz —
+      // lekin userning o'ZI yozgan entity'lar (originalEntitiesBeforeAugment)
+      // saqlanadi.
+      intent = { ...intent, entities: sanitizeResolvedUniversityEntities(intent.entities, originalEntitiesBeforeAugment) };
       // BOSQICH 11: classifier qisqa nom chiqarsa ham ("PDP University" →
       // "PDP"), TO'LIQ eslab qolingan nomni majburiy o'rnatamiz — search_tuition/
       // search_university aniq univni topsin (qisqa "PDP" boshqa univlarga ham
@@ -1064,13 +1089,19 @@ export function augmentFollowUp(
   if (isUniAttributeQuery) {
     const uniName = findLastMentionedUniversity(sessionContext, conversationHistory);
     if (uniName && !effectiveMessage.toLowerCase().includes(uniName.toLowerCase())) {
+      // Universitet nomi qo'shilishidan OLDINGI entity'lar — masalan "TATU →
+      // IT yo'nalishlari bormi?" da "IT" direction'i userning O'Z xabaridan
+      // keladi va sanitizatsiyada saqlanishi kerak.
+      const originalEntitiesBeforeAugment = intent.entities;
       effectiveMessage = `${uniName} ${effectiveMessage}`;
       intent = intentClassifier.classify(effectiveMessage);
       // Fix 19: university nomidagi so'zlar ("kimyo"→muhandislik,
       // "xalqaro"→cat 5) spurious entity bo'lib qolmasin — ular university'ni
       // noto'g'ri filtrlab yuborishi mumkin (masalan KIUT xususiy=4 bo'la
-      // turib institutionCategory=5 filteri uni exclude qiladi).
-      intent = { ...intent, entities: sanitizeResolvedUniversityEntities(intent.entities) };
+      // turib institutionCategory=5 filteri uni exclude qiladi). Lekin
+      // userning o'zi yozgan entity'lar (originalEntitiesBeforeAugment)
+      // saqlanadi.
+      intent = { ...intent, entities: sanitizeResolvedUniversityEntities(intent.entities, originalEntitiesBeforeAugment) };
       console.log(`[ContextResolver] "${userMessage}" → "${effectiveMessage}" → ${intent.intent}`);
       return { effectiveMessage, intent, augmented: true, additions: [uniName] };
     }

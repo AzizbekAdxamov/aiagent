@@ -700,6 +700,14 @@ export class IntentClassifier {
     for (const pattern of uniPatterns) {
       const match = message.match(pattern);
       if (match) {
+        // MUHIM (fix): "MIS" qisqartmasi o'zbekcha "mis" (copper/mis metali)
+        // so'zi bilan bir xil — case-insensitive pattern uni har doim
+        // universitet deb belgilardi ("mis haqida gap ketdi" → MIS).
+        // Faqat matn ichida chindan HAM BOSH HARFLAR bilan ("MIS") yozilgan
+        // bo'lsagina qisqartma deb hisoblanadi.
+        if (match[1].toUpperCase() === "MIS" && match[1] !== "MIS") {
+          continue;
+        }
         entities.university = match[1].toUpperCase();
         break;
       }
@@ -914,8 +922,21 @@ export class IntentClassifier {
     //   "davlat universitetini tanlamoqchiman" → davlat ✅ (amaliy)
     //   "davlatga kira olmadim, menga davlat universiteti tavsiya qil" → davlat ✅ (explicit talab)
     let messageForCat = messageWithoutStateExam;
-    if (/\bdavlat\b[^.!?]{0,80}\b(xohlardim|istardim|xohlagan\s+edim|orzu\s+qilganman|orzu\s+qilardim|xohlayotgan\s+edim)\b[^.!?]{0,120}\b(lekin|biroq|ammo)\b[^.!?]{0,80}\b(yetmadi|yetmayapman|yetmagan|olmadi|olmadim|o'tolmadim|o'ta\s+olmadim|kira\s+olmadim|tusholmadim|chiqmadi)\b/i.test(messageWithoutStateExam)) {
-      messageForCat = messageWithoutStateExam.replace(/\bdavlat\b/gi, " ");
+    const unachievedDesireMatch = messageWithoutStateExam.match(
+      /\bdavlat\b[^.!?]{0,80}\b(xohlardim|istardim|xohlagan\s+edim|orzu\s+qilganman|orzu\s+qilardim|xohlayotgan\s+edim)\b[^.!?]{0,120}\b(lekin|biroq|ammo)\b[^.!?]{0,80}\b(yetmadi|yetmayapman|yetmagan|olmadi|olmadim|o'tolmadim|o'ta\s+olmadim|kira\s+olmadim|tusholmadim|chiqmadi)\b/i
+    );
+    if (unachievedDesireMatch && unachievedDesireMatch.index !== undefined) {
+      // MUHIM (fix): faqat ERISHILMAGAN ISTAK jumlasidagi "davlat" olib
+      // tashlanadi — butun xabardan emas. Ilgari global replace butun
+      // xabardagi HAMMA "davlat" so'zini o'chirardi, shu jumladan keyingi
+      // jumladagi aniq, amaliy istakni ham ("...davlat universitetini
+      // tanlamoqchiman" kabi) — kategoriya noto'g'ri yo'qolib qolardi.
+      const clause = unachievedDesireMatch[0];
+      const clauseWithoutDavlat = clause.replace(/\bdavlat\b/gi, " ");
+      messageForCat =
+        messageWithoutStateExam.slice(0, unachievedDesireMatch.index) +
+        clauseWithoutDavlat +
+        messageWithoutStateExam.slice(unachievedDesireMatch.index + clause.length);
       console.log(`[SemanticTrap] erishilmagan davlat istagi — kategoriya o'chirildi: "${message.substring(0, 70)}"`);
     }
     // NEGATIV DAVLAT ISTAGI (STAGE 15e): "davlat bo'lmasin", "davlat istamayman"

@@ -115,11 +115,14 @@ export function validateRecommendationResults(
     }
     if (preferences.tuitionMin !== undefined && maxFee !== undefined && maxFee !== null && maxFee < preferences.tuitionMin) budgetViolation = true;
     if (budgetViolation) {
-      const mid = minFee && maxFee ? (minFee + maxFee) / 2 : (minFee || maxFee);
+      // MUHIM (fix): minFee === 0 falsy emas — bepul narxni "narx yo'q" deb
+      // ko'rsatib qo'ymaslik uchun `!= null` bilan tekshiriladi.
+      const mid =
+        minFee != null && maxFee != null ? (minFee + maxFee) / 2 : minFee ?? maxFee;
       rejected.push({
         name,
         verdict: "reject",
-        reasons: [`Byudjetdan oshadi (${mid ? `${Math.round(mid / 1_000_000)} mln` : "narx ma'lum emas"})`],
+        reasons: [`Byudjetdan oshadi (${mid != null ? `${Math.round(mid / 1_000_000)} mln` : "narx ma'lum emas"})`],
       });
       continue;
     }
